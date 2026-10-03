@@ -10,11 +10,17 @@ const ERASER_RADIUS = 6;
 const LOCAL_AUTHOR_ID = 'local';
 
 type Props = {
+  /** Finished strokes, drawn from the cached layer. */
   strokes: Stroke[];
+  /** Strokes other people are still drawing; repainted every frame on top of the cache. */
+  liveStrokes: Stroke[];
   tool: Tool;
   color: string;
   width: number;
+  onStrokeStart: (stroke: Stroke) => void;
+  onStrokePoints: (id: string, points: Point[]) => void;
   onStrokeAdd: (stroke: Stroke) => void;
+  onStrokeCancel: (id: string) => void;
   onStrokesErase: (ids: string[]) => void;
 };
 
@@ -44,11 +50,10 @@ export function Whiteboard(props: Props) {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(cache, 0, 0);
-    if (activeRef.current) {
-      const dpr = window.devicePixelRatio || 1;
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      drawStroke(ctx, activeRef.current);
-    }
+    const dpr = window.devicePixelRatio || 1;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    for (const stroke of propsRef.current.liveStrokes) drawStroke(ctx, stroke);
+    if (activeRef.current) drawStroke(ctx, activeRef.current);
   };
 
   const schedulePaint = () => {
@@ -101,6 +106,13 @@ export function Whiteboard(props: Props) {
     paint();
   }, [props.strokes]);
 
+  // Remote strokes in progress change often; they only need a repaint, not a cache rebuild.
+  useLayoutEffect(() => {
+    schedulePaint();
+    // schedulePaint only touches refs, so it is safe to omit.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.liveStrokes]);
+
   const erase = (points: Point[]) => {
     const { strokes, onStrokesErase } = propsRef.current;
     const ids = strokes
@@ -129,6 +141,7 @@ export function Whiteboard(props: Props) {
       points: [point],
       createdAt: Date.now(),
     };
+    propsRef.current.onStrokeStart(activeRef.current);
     schedulePaint();
   };
 
@@ -142,6 +155,7 @@ export function Whiteboard(props: Props) {
       erase(points);
     } else if (activeRef.current) {
       activeRef.current.points.push(...points);
+      propsRef.current.onStrokePoints(activeRef.current.id, points);
       schedulePaint();
     }
   };
@@ -151,8 +165,12 @@ export function Whiteboard(props: Props) {
     pointerIdRef.current = null;
     const stroke = activeRef.current;
     activeRef.current = null;
-    if (stroke && commit) propsRef.current.onStrokeAdd(stroke);
-    else paint(); // cancelled: drop the in-progress stroke from the screen
+    if (stroke && commit) {
+      propsRef.current.onStrokeAdd(stroke);
+    } else {
+      if (stroke) propsRef.current.onStrokeCancel(stroke.id);
+      paint(); // cancelled: drop the in-progress stroke from the screen
+    }
   };
 
   return (
