@@ -14,4 +14,6 @@ export const LIMITS = {
   maxCoordinate: 1_000_000,
   maxStrokeWidth: 100,
   maxNameLength: 32,
+  /** A cursor with no update for this long is considered gone (server drops it, client hides it). */
+  cursorTtlMs: 10_000,
 } as const;

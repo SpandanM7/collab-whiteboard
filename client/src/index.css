@@ -159,3 +159,106 @@ body,
   border-radius: 10px;
   cursor: pointer;
 }
+
+.cursor-layer {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.remote-cursor {
+  position: absolute;
+  top: 0;
+  left: 0;
+  /* Short ease so cursors glide between the ~40 ms updates instead of stepping. */
+  transition: transform 60ms linear;
+  will-change: transform;
+}
+
+.remote-cursor svg {
+  display: block;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.3));
+}
+
+.remote-cursor-label {
+  position: absolute;
+  top: 16px;
+  left: 12px;
+  max-width: 160px;
+  padding: 2px 6px;
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 16px;
+  color: #fff;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: var(--cursor-color);
+  border-radius: 6px;
+}
+
+.participants {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  max-width: 220px;
+  margin: 0;
+  padding: 8px 10px;
+  list-style: none;
+  background: #fff;
+  border: 1px solid #e5e4e7;
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  user-select: none;
+}
+
+.participant {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.participant-dot {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.participant-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+input.participant-name {
+  width: 100%;
+  padding: 2px 4px;
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+}
+
+input.participant-name:hover {
+  border-color: #e5e4e7;
+}
+
+input.participant-name:focus {
+  background: #fff;
+  border-color: #1c7ed6;
+  outline: none;
+}
+
+.participant-you {
+  flex: none;
+  color: #777;
+  font-size: 12px;
+}

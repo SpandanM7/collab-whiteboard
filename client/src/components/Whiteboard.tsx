@@ -2,6 +2,7 @@ import { nanoid } from 'nanoid';
 import { useLayoutEffect, useRef } from 'react';
 import type { PointerEvent } from 'react';
 import type { Point, Stroke } from '@whiteboard/shared';
+import { toBoard } from '../lib/coords.ts';
 import { drawStroke } from '../lib/drawing.ts';
 import { strokeHit } from '../lib/geometry.ts';
 import type { Tool } from '../types.ts';
@@ -22,12 +23,9 @@ type Props = {
   onStrokeAdd: (stroke: Stroke) => void;
   onStrokeCancel: (id: string) => void;
   onStrokesErase: (ids: string[]) => void;
+  /** The pointer moved over the board (hovering or drawing), in board space. */
+  onCursorMove: (point: Point) => void;
 };
-
-/** Maps a pointer event to board space. Identity offset for now; pan/zoom will go here. */
-function toBoard(e: { clientX: number; clientY: number }): Point {
-  return { x: e.clientX, y: e.clientY };
-}
 
 export function Whiteboard(props: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -146,6 +144,7 @@ export function Whiteboard(props: Props) {
   };
 
   const handlePointerMove = (e: PointerEvent<HTMLCanvasElement>) => {
+    propsRef.current.onCursorMove(toBoard(e));
     if (e.pointerId !== pointerIdRef.current) return;
     // Coalesced events recover samples the browser merged between frames.
     const samples = e.nativeEvent.getCoalescedEvents?.() ?? [];

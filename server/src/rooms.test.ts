@@ -228,3 +228,130 @@ describe('activity timestamps', () => {
     expect(later.createdAt).toBe(board.createdAt);
   });
 });
+
+describe('participants', () => {
+  it('lists everyone in the room, in join order', () => {
+    const rooms = makeRooms();
+    rooms.join(BOARD, alice);
+    const { participants } = expectOk(rooms.join(BOARD, bob));
+    expect(participants).toEqual([alice, bob]);
+  });
+
+  it('keeps participants of different boards apart', () => {
+    const rooms = makeRooms();
+    rooms.join(BOARD, alice);
+    const { participants } = expectOk(rooms.join('board-0002', bob));
+    expect(participants).toEqual([bob]);
+  });
+
+  it('removes a participant on leave and reports whether they were present', () => {
+    const rooms = makeRooms();
+    rooms.join(BOARD, alice);
+    rooms.join(BOARD, bob);
+    expect(rooms.leave(BOARD, 'alice')).toBe(true);
+    expect(rooms.leave(BOARD, 'alice')).toBe(false);
+    expect(rooms.leave('board-9999', 'bob')).toBe(false);
+    expect(expectOk(rooms.join(BOARD, bob)).participants).toEqual([bob]);
+  });
+
+  it('updates the name on rejoin without duplicating the participant', () => {
+    const rooms = makeRooms();
+    rooms.join(BOARD, alice);
+    const { participants } = expectOk(rooms.join(BOARD, { ...alice, name: 'Alicia' }));
+    expect(participants).toEqual([{ ...alice, name: 'Alicia' }]);
+  });
+
+  it('only keeps identity fields from the join payload', () => {
+    const rooms = makeRooms();
+    const sneaky = { ...alice, cursor: { x: 5, y: 5 } };
+    expect(expectOk(rooms.join(BOARD, sneaky)).participants).toEqual([alice]);
+  });
+});
+
+describe('cursors', () => {
+  const TTL = 10_000;
+
+  /** Rooms on a clock the test controls, so staleness does not depend on call counts. */
+  function clockRooms() {
+    const clock = { t: 1000 };
+    const rooms = new Rooms({ ...DEFAULT_ROOM_LIMITS, cursorTtlMs: TTL }, () => clock.t);
+    rooms.join(BOARD, alice);
+    rooms.join(BOARD, bob);
+    return { rooms, clock };
+  }
+
+  const cursorOf = (rooms: Rooms, id: string) => rooms.participant(BOARD, id)?.cursor;
+
+  it('records a member’s cursor and shows it to later joiners', () => {
+    const { rooms } = clockRooms();
+    expectOk(rooms.moveCursor(BOARD, 'alice', { x: 3, y: 4 }));
+    const { participants } = expectOk(
+      rooms.join(BOARD, { clientId: 'carol', name: 'Carol', color: '#00ff00' }),
+    );
+    expect(participants.find((p) => p.clientId === 'alice')?.cursor).toEqual({ x: 3, y: 4 });
+    expect(participants.find((p) => p.clientId === 'bob')?.cursor).toBeUndefined();
+  });
+
+  it('rejects cursor moves from clients who have not joined', () => {
+    const { rooms } = clockRooms();
+    expectError(rooms.moveCursor(BOARD, 'mallory', { x: 1, y: 1 }), 'not_in_room');
+    expectError(rooms.moveCursor('board-9999', 'alice', { x: 1, y: 1 }), 'not_in_room');
+  });
+
+  it('never puts cursors into the board state', () => {
+    const { rooms } = clockRooms();
+    rooms.moveCursor(BOARD, 'alice', { x: 1, y: 1 });
+    const { board } = expectOk(rooms.join(BOARD, bob));
+    expect(JSON.stringify(board)).not.toContain('cursor');
+  });
+
+  it('keeps the cursor when a member renames themselves', () => {
+    const { rooms } = clockRooms();
+    rooms.moveCursor(BOARD, 'alice', { x: 3, y: 4 });
+    rooms.join(BOARD, { ...alice, name: 'Alicia' });
+    expect(cursorOf(rooms, 'alice')).toEqual({ x: 3, y: 4 });
+  });
+
+  it('drops cursors that have not moved within the TTL', () => {
+    const { rooms, clock } = clockRooms();
+    rooms.moveCursor(BOARD, 'alice', { x: 1, y: 1 });
+    clock.t += TTL - 1;
+    expect(rooms.sweepStaleCursors()).toBe(0);
+    expect(cursorOf(rooms, 'alice')).toEqual({ x: 1, y: 1 });
+
+    clock.t += 1;
+    expect(rooms.sweepStaleCursors()).toBe(1);
+    expect(cursorOf(rooms, 'alice')).toBeUndefined();
+    // The participant stays; only the cursor goes.
+    expect(rooms.participant(BOARD, 'alice')).toEqual(alice);
+  });
+
+  it('keeps a cursor alive while it keeps moving, and only drops the idle one', () => {
+    const { rooms, clock } = clockRooms();
+    rooms.moveCursor(BOARD, 'alice', { x: 1, y: 1 });
+    rooms.moveCursor(BOARD, 'bob', { x: 2, y: 2 });
+    clock.t += TTL - 1;
+    rooms.moveCursor(BOARD, 'alice', { x: 9, y: 9 });
+    clock.t += 5;
+    expect(rooms.sweepStaleCursors()).toBe(1);
+    expect(cursorOf(rooms, 'alice')).toEqual({ x: 9, y: 9 });
+    expect(cursorOf(rooms, 'bob')).toBeUndefined();
+  });
+
+  it('sweeps stale cursors across every board', () => {
+    const { rooms, clock } = clockRooms();
+    rooms.join('board-0002', { clientId: 'carol', name: 'Carol', color: '#00ff00' });
+    rooms.moveCursor(BOARD, 'alice', { x: 1, y: 1 });
+    rooms.moveCursor('board-0002', 'carol', { x: 1, y: 1 });
+    clock.t += TTL;
+    expect(rooms.sweepStaleCursors()).toBe(2);
+  });
+
+  it('forgets the cursor when its owner leaves', () => {
+    const { rooms } = clockRooms();
+    rooms.moveCursor(BOARD, 'alice', { x: 1, y: 1 });
+    rooms.leave(BOARD, 'alice');
+    rooms.join(BOARD, alice);
+    expect(cursorOf(rooms, 'alice')).toBeUndefined();
+  });
+});

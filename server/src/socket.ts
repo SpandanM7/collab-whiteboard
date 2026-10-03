@@ -4,6 +4,7 @@ import {
   CLIENT_EVENTS,
   SERVER_EVENTS,
   boardClearPayload,
+  cursorMovePayload,
   elementDeletePayload,
   roomJoinPayload,
   strokeEndPayload,
@@ -60,7 +61,9 @@ export function registerSocketHandlers(socket: AppSocket, rooms: Rooms): void {
   const leaveCurrentRoom = () => {
     const boardId = socket.data.boardId;
     if (!boardId) return;
-    rooms.leave(boardId, socket.id);
+    if (rooms.leave(boardId, socket.id)) {
+      socket.to(channel(boardId)).emit(SERVER_EVENTS.participantLeft, { clientId: socket.id });
+    }
     void socket.leave(channel(boardId));
     socket.data.boardId = undefined;
   };
@@ -81,6 +84,9 @@ export function registerSocketHandlers(socket: AppSocket, rooms: Rooms): void {
       socket.data.boardId = boardId;
       void socket.join(channel(boardId));
       socket.emit(SERVER_EVENTS.roomState, snapshot);
+      // Also covers a rename: re-joining the same board updates the entry, and receivers upsert.
+      const self = rooms.participant(boardId, socket.id);
+      if (self) socket.to(channel(boardId)).emit(SERVER_EVENTS.participantJoined, self);
     } catch (err) {
       console.error('Unhandled error in room:join:', err);
       sendError('internal', 'Something went wrong on the server.');
@@ -134,6 +140,21 @@ export function registerSocketHandlers(socket: AppSocket, rooms: Rooms): void {
         return;
       }
       socket.to(channel(boardId)).emit(SERVER_EVENTS.boardCleared, {});
+    }),
+  );
+
+  socket.on(
+    CLIENT_EVENTS.cursorMove,
+    guarded(cursorMovePayload, ({ point }, boardId) => {
+      const result = rooms.moveCursor(boardId, socket.id, point);
+      if (!result.ok) {
+        sendError(result.error.code, result.error.message);
+        return;
+      }
+      // Volatile: a stale cursor position is worthless, so drop it rather than queue it.
+      socket
+        .to(channel(boardId))
+        .volatile.emit(SERVER_EVENTS.cursorMoved, { clientId: socket.id, point });
     }),
   );
 
