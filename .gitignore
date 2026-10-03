@@ -150,3 +150,5 @@ vite.config.ts.timestamp-*
 
 CLAUDE.md
 SPEC.md
+
+DEPLOYMENT_NOTES.md
