@@ -1,11 +1,22 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import type { Participant } from '@whiteboard/shared';
+import type { BoardElement, ElementAddPayload, Participant } from '@whiteboard/shared';
 import { DEFAULT_ROOM_LIMITS, Rooms } from './rooms.ts';
 import type { Result, RoomLimits } from './rooms.ts';
 
 const BOARD = 'board-0001';
 const alice: Participant = { clientId: 'alice', name: 'Alice', color: '#ff0000' };
 const bob: Participant = { clientId: 'bob', name: 'Bob', color: '#0000ff' };
+
+const pointsOf = (element?: BoardElement) => (element?.type === 'stroke' ? element.points : []);
+
+const rect = (id: string): ElementAddPayload => ({
+  id,
+  type: 'rect',
+  color: '#000000',
+  width: 2,
+  start: { x: 0, y: 0 },
+  end: { x: 10, y: 20 },
+});
 
 const start = (id: string) => ({ id, color: '#000000', width: 4, point: { x: 0, y: 0 } });
 
@@ -112,7 +123,7 @@ describe('strokes', () => {
     expectOk(rooms.endStroke(BOARD, 'alice', 's1'));
 
     const { board } = expectOk(rooms.join(BOARD, bob));
-    expect(board.elements[0].points.map((p) => p.x)).toEqual([0, 1, 2, 3]);
+    expect(pointsOf(board.elements[0]).map((p) => p.x)).toEqual([0, 1, 2, 3]);
   });
 
   it('rejects appending after the stroke ended', () => {
@@ -171,6 +182,62 @@ describe('strokes', () => {
     expectError(rooms.startStroke('board-9999', 'alice', start('s1')), 'not_in_room');
     expectError(rooms.deleteElement(BOARD, 'mallory', 's1'), 'not_in_room');
     expectError(rooms.clearBoard(BOARD, 'mallory'), 'not_in_room');
+  });
+});
+
+describe('shapes', () => {
+  let rooms: Rooms;
+  beforeEach(() => {
+    rooms = makeRooms();
+    rooms.join(BOARD, alice);
+    rooms.join(BOARD, bob);
+  });
+
+  it('stores a shape with the sender as author and a server timestamp', () => {
+    const shape = expectOk(rooms.addElement(BOARD, 'alice', rect('r1')));
+    expect(shape).toMatchObject({ id: 'r1', type: 'rect', authorId: 'alice' });
+    expect(shape.createdAt).toBeGreaterThan(0);
+    const { board } = expectOk(rooms.join(BOARD, bob));
+    expect(board.elements.map((e) => e.id)).toEqual(['r1']);
+  });
+
+  it('keeps drawing order across strokes and shapes', () => {
+    expectOk(rooms.startStroke(BOARD, 'alice', start('s1')));
+    expectOk(rooms.addElement(BOARD, 'bob', rect('r1')));
+    const { board } = expectOk(rooms.join(BOARD, bob));
+    expect(board.elements.map((e) => e.id)).toEqual(['s1', 'r1']);
+  });
+
+  it('rejects a duplicate id, including one used by a stroke', () => {
+    expectOk(rooms.addElement(BOARD, 'alice', rect('r1')));
+    expectError(rooms.addElement(BOARD, 'bob', rect('r1')), 'duplicate_id');
+    expectOk(rooms.startStroke(BOARD, 'alice', start('s1')));
+    expectError(rooms.addElement(BOARD, 'alice', rect('s1')), 'duplicate_id');
+  });
+
+  it('counts shapes toward the element limit', () => {
+    const small = makeRooms({ maxElementsPerBoard: 2 });
+    small.join(BOARD, alice);
+    expectOk(small.addElement(BOARD, 'alice', rect('r1')));
+    expectOk(small.addElement(BOARD, 'alice', rect('r2')));
+    expectError(small.addElement(BOARD, 'alice', rect('r3')), 'board_full');
+    expectError(small.startStroke(BOARD, 'alice', start('s1')), 'board_full');
+  });
+
+  it('requires membership', () => {
+    expectError(rooms.addElement(BOARD, 'stranger', rect('r1')), 'not_in_room');
+  });
+
+  it('cannot be extended or ended like a stroke', () => {
+    expectOk(rooms.addElement(BOARD, 'alice', rect('r1')));
+    expectError(rooms.appendPoints(BOARD, 'alice', 'r1', [{ x: 1, y: 1 }]), 'unknown_stroke');
+    expectError(rooms.endStroke(BOARD, 'alice', 'r1'), 'unknown_stroke');
+  });
+
+  it('can be deleted by anyone without disturbing the point budget', () => {
+    expectOk(rooms.addElement(BOARD, 'alice', rect('r1')));
+    expect(expectOk(rooms.deleteElement(BOARD, 'bob', 'r1'))).toBe(true);
+    expect(expectOk(rooms.join(BOARD, bob)).board.elements).toEqual([]);
   });
 });
 
@@ -381,7 +448,7 @@ describe('replaying a stroke after its author dropped', () => {
 
     const { board } = expectOk(rooms.join(BOARD, bob));
     expect(board.elements).toHaveLength(1);
-    expect(board.elements[0]?.points).toHaveLength(3);
+    expect(pointsOf(board.elements[0])).toHaveLength(3);
     expect(board.elements[0]?.authorId).toBe('bob');
   });
 

@@ -4,6 +4,8 @@ import {
   boardClearPayload,
   cursorMovePayload,
   cursorMovedPayload,
+  elementAddPayload,
+  boardElementSchema,
   participantJoinedPayload,
   participantLeftPayload,
   elementDeletePayload,
@@ -142,5 +144,77 @@ describe('presence payloads', () => {
     expect(participantJoinedPayload.safeParse(p).success).toBe(true);
     expect(participantJoinedPayload.safeParse({ ...p, cursor: point }).success).toBe(true);
     expect(participantJoinedPayload.safeParse({ ...p, name: ' ' }).success).toBe(false);
+  });
+});
+
+describe('elementAddPayload', () => {
+  const rect = {
+    id: 'r1',
+    type: 'rect',
+    color: '#112233',
+    width: 3,
+    fill: '#ffeecc',
+    start: point,
+    end: { x: 50, y: 60 },
+  };
+
+  it.each(['rect', 'ellipse', 'line', 'arrow'])('accepts a %s', (type) => {
+    expect(elementAddPayload.safeParse({ ...rect, type }).success).toBe(true);
+  });
+
+  it('accepts a shape without a fill', () => {
+    const { fill: _fill, ...outline } = rect;
+    expect(elementAddPayload.safeParse(outline).success).toBe(true);
+  });
+
+  it('does not let the client choose the author or timestamp', () => {
+    const parsed = elementAddPayload.parse({ ...rect, authorId: 'x', createdAt: 5 });
+    expect(parsed).not.toHaveProperty('authorId');
+    expect(parsed).not.toHaveProperty('createdAt');
+  });
+
+  it('drops a fill sent on a line', () => {
+    expect(elementAddPayload.parse({ ...rect, type: 'line' })).not.toHaveProperty('fill');
+  });
+
+  it.each([
+    ['unknown type', { type: 'star' }],
+    ['stroke type', { type: 'stroke' }],
+    ['bad fill color', { fill: 'blue' }],
+    ['zero width', { width: 0 }],
+    ['too wide', { width: LIMITS.maxStrokeWidth + 1 }],
+    ['start out of range', { start: { x: LIMITS.maxCoordinate + 1, y: 0 } }],
+    ['missing end', { end: undefined }],
+  ])('rejects %s', (_label, override) => {
+    expect(elementAddPayload.safeParse({ ...rect, ...override }).success).toBe(false);
+  });
+});
+
+describe('boardElementSchema', () => {
+  it('accepts strokes and shapes in one board', () => {
+    const stroke = {
+      id: 's1',
+      type: 'stroke',
+      authorId: 'a',
+      color: '#000000',
+      width: 2,
+      points: [point],
+      createdAt: 1,
+    };
+    const arrow = {
+      id: 'a1',
+      type: 'arrow',
+      authorId: 'a',
+      color: '#000000',
+      width: 2,
+      start: point,
+      end: point,
+      createdAt: 2,
+    };
+    expect(boardElementSchema.safeParse(stroke).success).toBe(true);
+    expect(boardElementSchema.safeParse(arrow).success).toBe(true);
+    expect(
+      boardElementSchema.safeParse({ ...arrow, points: undefined, start: undefined }).success,
+    ).toBe(false);
   });
 });

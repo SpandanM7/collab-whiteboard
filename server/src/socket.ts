@@ -6,6 +6,7 @@ import {
   SERVER_EVENTS,
   boardClearPayload,
   cursorMovePayload,
+  elementAddPayload,
   elementDeletePayload,
   roomJoinPayload,
   strokeEndPayload,
@@ -153,6 +154,15 @@ export function registerSocketHandlers(
       socket
         .to(channel(boardId))
         .emit(SERVER_EVENTS.strokeEnd, { ...payload, authorId: socket.id });
+    }),
+  );
+
+  socket.on(
+    CLIENT_EVENTS.elementAdd,
+    guarded(elementAddPayload, (payload, boardId) => {
+      const shape = unwrap(rooms.addElement(boardId, socket.id, payload));
+      if (!shape) return;
+      socket.to(channel(boardId)).emit(SERVER_EVENTS.elementAdded, shape);
     }),
   );
 
