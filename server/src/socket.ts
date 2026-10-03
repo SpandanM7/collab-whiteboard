@@ -2,6 +2,7 @@ import type { Server, Socket } from 'socket.io';
 import type { z } from 'zod';
 import {
   CLIENT_EVENTS,
+  LIMITS,
   SERVER_EVENTS,
   boardClearPayload,
   cursorMovePayload,
@@ -12,6 +13,8 @@ import {
   strokeStartPayload,
 } from '@whiteboard/shared';
 import type { ClientToServerEvents, ErrorCode, ServerToClientEvents } from '@whiteboard/shared';
+import { TokenBucket } from './rateLimit.ts';
+import type { RateLimit } from './rateLimit.ts';
 import type { Result, Rooms } from './rooms.ts';
 
 export type AppServer = Server<ClientToServerEvents, ServerToClientEvents>;
@@ -21,10 +24,40 @@ type SocketData = { boardId?: string };
 
 const channel = (boardId: string) => `board:${boardId}`;
 
+export const DEFAULT_RATE_LIMIT: RateLimit = {
+  burst: LIMITS.eventBurst,
+  perSecond: LIMITS.eventsPerSecond,
+};
+
+/** Rate-limit errors are sent at most this often, so a flood does not become a reply flood. */
+const RATE_ERROR_INTERVAL_MS = 1_000;
+
 /** Wires one connection's events to the rooms module. Every payload is validated first. */
-export function registerSocketHandlers(socket: AppSocket, rooms: Rooms): void {
+export function registerSocketHandlers(
+  socket: AppSocket,
+  rooms: Rooms,
+  rateLimit: RateLimit = DEFAULT_RATE_LIMIT,
+): void {
   const sendError = (code: ErrorCode, message: string) =>
     socket.emit(SERVER_EVENTS.error, { code, message });
+
+  // Runs before every incoming event, so a flood is dropped before it is parsed or applied.
+  const bucket = new TokenBucket(rateLimit);
+  let lastRateError = -Infinity;
+  socket.use((_packet, next) => {
+    if (bucket.take()) {
+      next();
+      return;
+    }
+    const now = Date.now();
+    if (now - lastRateError >= RATE_ERROR_INTERVAL_MS) {
+      lastRateError = now;
+      sendError('rate_limited', 'You are sending too fast. Some changes were dropped.');
+    }
+  });
+
+  // A transport-level error must not surface as an unhandled 'error' event.
+  socket.on('error', (err) => console.error('Socket error:', err));
 
   /**
    * Validates the raw payload, then runs `handler` with the joined board id. Invalid input and
