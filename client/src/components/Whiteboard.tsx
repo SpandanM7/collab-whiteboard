@@ -18,7 +18,7 @@ type Props = {
   tool: Tool;
   color: string;
   width: number;
-  /** Not connected: ignore input, so nothing is drawn that the server would never hear about. */
+  /** The board cannot be used at all (e.g. the room is full): ignore input. */
   disabled: boolean;
   onStrokeStart: (stroke: Stroke) => void;
   onStrokePoints: (id: string, points: Point[]) => void;
@@ -113,7 +113,7 @@ export function Whiteboard(props: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.liveStrokes]);
 
-  // Going offline mid-stroke: drop it rather than leave a stroke that exists only locally.
+  // The board became unusable mid-stroke: drop it rather than leave a stroke that cannot be saved.
   useLayoutEffect(() => {
     if (!props.disabled) return;
     pointerIdRef.current = null;

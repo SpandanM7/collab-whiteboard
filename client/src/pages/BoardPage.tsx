@@ -18,7 +18,8 @@ export function BoardPage({ boardId }: { boardId: string }) {
   const [color, setColor] = useState('#1a1a1a');
   const [width, setWidth] = useState(4);
   const [confirmingClear, setConfirmingClear] = useState(false);
-  // Drawing and clearing only make sense while the server is listening.
+  // Drawing and erasing work offline (they sync later). Clearing is online-only: replaying it
+  // after a reconnect could wipe what others drew in the meantime.
   const online = sync.status === 'connected' && !sync.blocked;
 
   return (
@@ -29,7 +30,7 @@ export function BoardPage({ boardId }: { boardId: string }) {
         tool={tool}
         color={color}
         width={width}
-        disabled={!online}
+        disabled={sync.blocked !== null}
         onStrokeStart={sync.startStroke}
         onStrokePoints={sync.addPoints}
         onStrokeAdd={sync.finishStroke}
@@ -60,7 +61,7 @@ export function BoardPage({ boardId }: { boardId: string }) {
           }}
         />
       </div>
-      <ConnectionStatus status={sync.status} blocked={sync.blocked} />
+      <ConnectionStatus status={sync.status} blocked={sync.blocked} unsynced={sync.unsynced} />
       <Toast toast={sync.toast} onDismiss={sync.dismissToast} />
       <ConfirmDialog
         // Also closes if the connection drops while the dialog is open.

@@ -408,12 +408,24 @@ input.participant-name:focus {
   animation: spin 0.9s linear infinite;
 }
 
+.spinner.small {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  border-width: 2px;
+}
+
 .offline-banner {
   position: fixed;
   bottom: 16px;
   left: 50%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
   max-width: calc(100vw - 32px);
   padding: 10px 16px;
+  /* Drawing continues underneath, so the banner must not swallow pointer events. */
+  pointer-events: none;
   color: #7a2e0e;
   text-align: center;
   background: #fff4e5;
@@ -422,6 +434,11 @@ input.participant-name:focus {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
   transform: translateX(-50%);
   z-index: 5;
+}
+
+.offline-banner.delayed {
+  /* Fades in after a short delay so a fast connection never flashes it. */
+  animation: fade-in 0.3s 1.5s both;
 }
 
 .dialog {

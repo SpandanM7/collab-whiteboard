@@ -85,5 +85,8 @@ SPEC.md   Product spec and socket event contract
 
 The client is a static site and the server is a long-running Node process, deployed separately.
 Free-tier servers cold-start (up to about a minute), so the first connection can be slow; the
-client shows a "Connecting to server" message while it waits. Deployment steps are added at
+client shows a "Connecting to server" message while it waits. Drawing is not blocked meanwhile:
+strokes made while connecting (or while the connection is down) stay on screen and are synced and
+merged with everyone else's work once the server is reachable. Clearing the board needs a
+connection. If the server restarts, boards in memory are lost. Deployment steps are added at
 milestone M5.
