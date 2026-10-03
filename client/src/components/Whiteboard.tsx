@@ -18,6 +18,8 @@ type Props = {
   tool: Tool;
   color: string;
   width: number;
+  /** Not connected: ignore input, so nothing is drawn that the server would never hear about. */
+  disabled: boolean;
   onStrokeStart: (stroke: Stroke) => void;
   onStrokePoints: (id: string, points: Point[]) => void;
   onStrokeAdd: (stroke: Stroke) => void;
@@ -111,6 +113,17 @@ export function Whiteboard(props: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.liveStrokes]);
 
+  // Going offline mid-stroke: drop it rather than leave a stroke that exists only locally.
+  useLayoutEffect(() => {
+    if (!props.disabled) return;
+    pointerIdRef.current = null;
+    if (activeRef.current) {
+      activeRef.current = null;
+      paint();
+    }
+    // paint only touches refs, so it is safe to omit.
+  }, [props.disabled]);
+
   const erase = (points: Point[]) => {
     const { strokes, onStrokesErase } = propsRef.current;
     const ids = strokes
@@ -120,7 +133,7 @@ export function Whiteboard(props: Props) {
   };
 
   const handlePointerDown = (e: PointerEvent<HTMLCanvasElement>) => {
-    if (pointerIdRef.current !== null || e.button !== 0) return;
+    if (propsRef.current.disabled || pointerIdRef.current !== null || e.button !== 0) return;
     pointerIdRef.current = e.pointerId;
     e.currentTarget.setPointerCapture(e.pointerId);
 
@@ -175,7 +188,7 @@ export function Whiteboard(props: Props) {
   return (
     <canvas
       ref={canvasRef}
-      className={`whiteboard ${props.tool}`}
+      className={`whiteboard ${props.tool}${props.disabled ? ' disabled' : ''}`}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={(e) => finish(e, true)}
