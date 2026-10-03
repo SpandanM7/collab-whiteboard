@@ -1,13 +1,44 @@
 import { useSyncExternalStore } from 'react';
 import { boardIdSchema } from '@whiteboard/shared';
 
-export type Route = { name: 'landing' } | { name: 'board'; boardId: string };
+/** `invalidBoard`: the path looked like a board link, but its id is not valid. */
+export type Route = { name: 'landing'; invalidBoard?: true } | { name: 'board'; boardId: string };
 
-/** `/board/:id` is a board when the id is valid; every other path shows the landing page. */
+/**
+ * `/board/:id` is a board when the id is valid. A malformed id shows the landing page with
+ * `invalidBoard` set; every other path shows the landing page.
+ */
 export function parseRoute(pathname: string): Route {
   const match = /^\/board\/([^/]+)\/?$/.exec(pathname);
-  const id = match ? boardIdSchema.safeParse(match[1]) : undefined;
-  return id?.success ? { name: 'board', boardId: id.data } : { name: 'landing' };
+  if (!match) return { name: 'landing' };
+  const id = boardIdSchema.safeParse(decodeURIComponentSafe(match[1]));
+  return id.success ? { name: 'board', boardId: id.data } : { name: 'landing', invalidBoard: true };
+}
+
+function decodeURIComponentSafe(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value; // malformed escape: let the id schema reject it
+  }
+}
+
+/** Accepts a bare board code or a pasted board URL; returns the board id, or null if invalid. */
+export function parseJoinCode(input: string): string | null {
+  const text = input.trim();
+  if (!text) return null;
+  let pathname = `/board/${text}`;
+  if (/^https?:\/\//i.test(text)) {
+    try {
+      pathname = new URL(text).pathname;
+    } catch {
+      return null;
+    }
+  } else if (text.includes('/')) {
+    pathname = text.startsWith('/') ? text : `/${text}`;
+  }
+  const route = parseRoute(pathname);
+  return route.name === 'board' ? route.boardId : null;
 }
 
 export const boardPath = (boardId: string) => `/board/${boardId}`;
