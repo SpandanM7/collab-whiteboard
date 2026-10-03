@@ -7,10 +7,11 @@ import type {
   ErrorCode,
   Point,
   ServerToClientEvents,
+  Shape,
   Stroke,
 } from '@whiteboard/shared';
 import type { Identity } from '../lib/identity.ts';
-import { PendingSync } from '../lib/pendingSync.ts';
+import { PendingSync, shapeJob } from '../lib/pendingSync.ts';
 import type { Job, Outgoing } from '../lib/pendingSync.ts';
 import { boardReducer, initialBoardState } from './boardReducer.ts';
 import { initialPresenceState, presenceReducer } from './presenceReducer.ts';
@@ -50,6 +51,9 @@ const serverUrl = import.meta.env.VITE_SERVER_URL as string | undefined;
 
 function sendMessage(socket: AppSocket, message: Outgoing): void {
   switch (message.event) {
+    case CLIENT_EVENTS.elementAdd:
+      socket.emit(message.event, message.payload);
+      break;
     case CLIENT_EVENTS.elementDelete:
       socket.emit(message.event, message.payload);
       break;
@@ -217,7 +221,7 @@ export function useBoardSync(boardId: string, identity: Identity) {
       startOutbox(jobs);
       if (dropped > 0) {
         showToast(
-          `${dropped} of your offline ${dropped === 1 ? 'stroke' : 'strokes'} couldn't be saved ` +
+          `${dropped} of your offline ${dropped === 1 ? 'drawing' : 'drawings'} couldn't be saved ` +
             'because the board is full.',
         );
       }
@@ -255,6 +259,7 @@ export function useBoardSync(boardId: string, identity: Identity) {
       dispatch({ type: 'remote-points', id, points });
     });
     socket.on(SERVER_EVENTS.strokeEnd, ({ id }) => dispatch({ type: 'remote-end', id }));
+    socket.on(SERVER_EVENTS.elementAdded, (element) => dispatch({ type: 'remote-add', element }));
     socket.on(SERVER_EVENTS.elementDeleted, ({ id }) => dispatch({ type: 'delete', ids: [id] }));
     socket.on(SERVER_EVENTS.boardCleared, () => {
       // Whatever we had not uploaded yet was drawn before this clear; do not resurrect it.
@@ -379,7 +384,7 @@ export function useBoardSync(boardId: string, identity: Identity) {
   /** The local stroke was completed: keep it, and make sure the server ends up with all of it. */
   const finishStroke = useCallback(
     (stroke: Stroke) => {
-      dispatch({ type: 'add-local', stroke });
+      dispatch({ type: 'add-local', element: stroke });
       flushPoints();
       const live = liveRef.current?.id === stroke.id ? liveRef.current : null;
       const announcedHere = isLive(stroke.id);
@@ -396,6 +401,25 @@ export function useBoardSync(boardId: string, identity: Identity) {
       if (joinedRef.current) enqueueJob(job);
     },
     [emitIfJoined, enqueueJob, flushPoints, isLive, pendingSync],
+  );
+
+  /**
+   * A local shape was finished. It is already on screen; others only see it now, on release. Made
+   * while not joined, it is kept as pending work and replayed after the next room:state.
+   */
+  const addShape = useCallback(
+    (shape: Shape) => {
+      dispatch({ type: 'add-local', element: shape });
+      if (joinedRef.current) {
+        emitIfJoined((socket) => {
+          for (const message of shapeJob(shape).messages) sendMessage(socket, message);
+        });
+        return;
+      }
+      pendingSync.addShape(shape);
+      setUnsynced(pendingSync.size);
+    },
+    [emitIfJoined, pendingSync],
   );
 
   /** The local stroke was cancelled (e.g. pointercancel): remove it everywhere. */
@@ -420,7 +444,7 @@ export function useBoardSync(boardId: string, identity: Identity) {
       dispatch({ type: 'delete', ids });
       const joined = joinedRef.current;
       for (const id of ids) {
-        const entry = pendingSync.removeStroke(id);
+        const entry = pendingSync.removeElement(id);
         if (joined) {
           emitIfJoined((socket) => socket.emit(CLIENT_EVENTS.elementDelete, { id }));
         } else if (!entry || entry.onServer) {
@@ -444,7 +468,7 @@ export function useBoardSync(boardId: string, identity: Identity) {
   }, [emitIfJoined, pendingSync, resetOutbox]);
 
   return {
-    strokes: board.committed,
+    elements: board.committed,
     liveStrokes: board.live,
     participants: presence.participants,
     cursors: presence.cursors,
@@ -457,6 +481,7 @@ export function useBoardSync(boardId: string, identity: Identity) {
     startStroke,
     addPoints,
     finishStroke,
+    addShape,
     cancelStroke,
     deleteElements,
     clearBoard,

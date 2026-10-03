@@ -90,6 +90,23 @@ describe('view maths', () => {
 });
 
 describe('content bounds', () => {
+  it('includes shapes, not just strokes', () => {
+    const bounds = contentBounds([
+      stroke([{ x: 0, y: 0 }], 2),
+      {
+        id: 'r1',
+        type: 'rect',
+        authorId: 'a',
+        color: '#000000',
+        width: 4,
+        start: { x: 300, y: 200 },
+        end: { x: 100, y: 120 },
+        createdAt: 0,
+      },
+    ]);
+    expect(bounds).toEqual({ left: -1, top: -1, right: 302, bottom: 202 });
+  });
+
   it('is null for an empty board', () => {
     expect(contentBounds([])).toBeNull();
   });

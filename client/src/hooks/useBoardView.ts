@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { Point, Stroke } from '@whiteboard/shared';
+import type { BoardElement, Point } from '@whiteboard/shared';
 import { rectContains } from '../lib/geometry.ts';
 import { HOME_VIEW, centerOn, contentBounds, fitView, visibleRect, zoomAt } from '../lib/view.ts';
 import type { View } from '../lib/view.ts';
@@ -11,15 +11,15 @@ const ZOOM_STEP = 1.25;
  * This person's pan and zoom over the board. Local only: it never goes over the socket, so a
  * phone and a desktop can look at different parts of the same board.
  */
-export function useBoardView(strokes: Stroke[]) {
+export function useBoardView(elements: BoardElement[]) {
   const [view, setView] = useState<View>(HOME_VIEW);
   // A board opens at 100% unless what is on it lies off screen (say, drawn on a bigger screen).
   // Then it is framed once, as long as the person has not moved the view or drawn yet.
   const [pristine, setPristine] = useState(true);
 
-  if (pristine && strokes.length > 0) {
+  if (pristine && elements.length > 0) {
     setPristine(false);
-    const bounds = contentBounds(strokes);
+    const bounds = contentBounds(elements);
     const size = viewportSize();
     if (bounds && !rectContains(visibleRect(view, size), bounds)) {
       setView(fitView(bounds, size, uiInsets()));
@@ -46,7 +46,7 @@ export function useBoardView(strokes: Stroke[]) {
     zoomOut: () => changeView(zoomAt(view, screenCenter(), view.scale / ZOOM_STEP)),
     resetZoom: () => changeView(zoomAt(view, screenCenter(), 1)),
     fitAll: () => {
-      const bounds = contentBounds(strokes);
+      const bounds = contentBounds(elements);
       changeView(bounds ? fitView(bounds, viewportSize(), uiInsets()) : HOME_VIEW);
     },
     jumpTo: (board: Point) => changeView(centerOn(view, board, viewportSize())),

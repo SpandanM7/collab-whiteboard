@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Stroke } from '@whiteboard/shared';
+import type { BoardElement, Shape, Stroke } from '@whiteboard/shared';
 import { boardReducer, initialBoardState } from './boardReducer.ts';
 import type { BoardAction, BoardState } from './boardReducer.ts';
 
@@ -12,6 +12,19 @@ const stroke = (id: string, xs: number[] = [0]): Stroke => ({
   points: xs.map((x) => ({ x, y: 0 })),
   createdAt: 0,
 });
+
+const rect = (id: string): Shape => ({
+  id,
+  type: 'rect',
+  authorId: 'remote',
+  color: '#000000',
+  width: 2,
+  start: { x: 0, y: 0 },
+  end: { x: 10, y: 10 },
+  createdAt: 0,
+});
+
+const pointsOf = (element?: BoardElement) => (element?.type === 'stroke' ? element.points : []);
 
 const run = (actions: BoardAction[], from: BoardState = initialBoardState) =>
   actions.reduce(boardReducer, from);
@@ -81,7 +94,7 @@ describe('boardReducer', () => {
 
   it('replaces local state on reset (reconnect) and drops in-progress strokes', () => {
     const state = run([
-      { type: 'add-local', stroke: stroke('mine') },
+      { type: 'add-local', element: stroke('mine') },
       { type: 'remote-start', stroke: stroke('b') },
       { type: 'reset', elements: [stroke('server')] },
     ]);
@@ -93,9 +106,51 @@ describe('boardReducer', () => {
     const partial = stroke('s1', [0, 1]);
     const state = run([
       { type: 'reset', elements: [partial] },
-      { type: 'add-local', stroke: stroke('s1', [0, 1, 2, 3]) },
+      { type: 'add-local', element: stroke('s1', [0, 1, 2, 3]) },
     ]);
     expect(state.committed).toHaveLength(1);
-    expect(state.committed[0].points).toHaveLength(4);
+    expect(pointsOf(state.committed[0])).toHaveLength(4);
+  });
+
+  describe('shapes', () => {
+    it('adds a remote shape straight to the committed layer', () => {
+      const state = run([
+        { type: 'reset', elements: [stroke('old')] },
+        { type: 'remote-add', element: rect('r1') },
+      ]);
+      expect(state.committed.map((e) => e.id)).toEqual(['old', 'r1']);
+      expect(state.live).toEqual([]);
+    });
+
+    it('ignores a shape it already has (duplicate delivery)', () => {
+      const once = run([{ type: 'remote-add', element: rect('r1') }]);
+      expect(boardReducer(once, { type: 'remote-add', element: rect('r1') })).toBe(once);
+    });
+
+    it('merges a local shape with the same id instead of duplicating it', () => {
+      const state = run([
+        { type: 'add-local', element: rect('r1') },
+        { type: 'add-local', element: rect('r1') },
+      ]);
+      expect(state.committed).toHaveLength(1);
+    });
+
+    it('ignores stroke points aimed at a shape', () => {
+      const state = run([{ type: 'reset', elements: [rect('r1')] }]);
+      const next = boardReducer(state, {
+        type: 'remote-points',
+        id: 'r1',
+        points: [{ x: 1, y: 1 }],
+      });
+      expect(next).toBe(state);
+    });
+
+    it('deletes shapes like strokes', () => {
+      const state = run([
+        { type: 'reset', elements: [rect('r1'), stroke('s1')] },
+        { type: 'delete', ids: ['r1'] },
+      ]);
+      expect(state.committed.map((e) => e.id)).toEqual(['s1']);
+    });
   });
 });
