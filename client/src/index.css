@@ -600,7 +600,7 @@ input.participant-name:focus {
 }
 
 /* Compact (phones, small or portrait tablets): bottom toolbar, slim top bar, popovers. */
-@media (max-width: 899px) {
+@media (max-width: 1099px) {
   .toolbar {
     top: auto;
     bottom: 0;
@@ -780,14 +780,14 @@ input.participant-name:focus {
 }
 
 /* The width toggle only exists in the compact layout. */
-@media (max-width: 899px) {
+@media (max-width: 1099px) {
   .toolbar .width-toggle {
     display: flex;
   }
 }
 
 /* Short screens (phones in landscape): icons only, so the bar stays thin. */
-@media (max-width: 899px) and (max-height: 500px) {
+@media (max-width: 1099px) and (max-height: 500px) {
   :root {
     --toolbar-h: 52px;
   }
@@ -809,5 +809,118 @@ input.participant-name:focus {
     overflow: hidden;
     clip-path: inset(50%);
     white-space: nowrap;
+  }
+}
+
+/* Panning: the hand tool, Space + drag, and the middle button all show a grab cursor. */
+.whiteboard.hand,
+.whiteboard[data-pan='ready'] {
+  cursor: grab;
+}
+
+.whiteboard[data-pan='active'] {
+  cursor: grabbing;
+}
+
+.top-right {
+  z-index: 7;
+}
+
+.zoom {
+  position: fixed;
+  right: calc(var(--safe-right) + 16px);
+  bottom: calc(var(--safe-bottom) + 16px);
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  background: #fff;
+  border: 1px solid #e5e4e7;
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  user-select: none;
+}
+
+.zoom button {
+  display: grid;
+  place-items: center;
+  min-width: 36px;
+  height: 36px;
+  padding: 0 6px;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.zoom button:hover:not(:disabled) {
+  background: #f4f3ec;
+}
+
+.zoom button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.zoom .zoom-level {
+  min-width: 56px;
+  font-size: 13px;
+}
+
+/* Points toward someone whose cursor is off screen; clicking it jumps to them. */
+.edge-marker {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  margin: -16px 0 0 -16px;
+  padding: 0;
+  background: var(--cursor-color);
+  border: 2px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+  cursor: pointer;
+  pointer-events: auto;
+  transition: transform 60ms linear;
+}
+
+@media (pointer: coarse) {
+  .zoom button {
+    min-width: 44px;
+    height: 44px;
+  }
+
+  .edge-marker {
+    width: 40px;
+    height: 40px;
+    margin: -20px 0 0 -20px;
+  }
+}
+
+@media (max-width: 1099px) {
+  /* A column at the right edge: the bottom is taken by the toolbar and the top by the top bar. */
+  .zoom {
+    top: 50%;
+    right: calc(var(--safe-right) + 10px);
+    bottom: auto;
+    flex-direction: column;
+    transform: translateY(-50%);
+  }
+
+  .zoom button {
+    min-width: 44px;
+    height: 44px;
+  }
+
+  .zoom .zoom-level {
+    min-width: 44px;
+    font-size: 11px;
   }
 }
