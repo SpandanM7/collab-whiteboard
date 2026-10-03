@@ -16,4 +16,7 @@ export const LIMITS = {
   maxNameLength: 32,
   /** A cursor with no update for this long is considered gone (server drops it, client hides it). */
   cursorTtlMs: 10_000,
+  /** Per-socket rate limit: a burst of this many events, refilled at `eventsPerSecond`. */
+  eventBurst: 150,
+  eventsPerSecond: 100,
 } as const;

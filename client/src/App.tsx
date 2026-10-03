@@ -8,7 +8,7 @@ function App() {
   return route.name === 'board' ? (
     <BoardPage key={route.boardId} boardId={route.boardId} />
   ) : (
-    <LandingPage />
+    <LandingPage invalidBoard={route.invalidBoard} />
   );
 }
 

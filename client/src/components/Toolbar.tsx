@@ -7,12 +7,24 @@ type Props = {
   onToolChange: (tool: Tool) => void;
   onColorChange: (color: string) => void;
   onWidthChange: (width: number) => void;
+  onClear: () => void;
+  /** Clearing has to reach the server, so it is unavailable while offline. */
+  clearDisabled?: boolean;
 };
 
 export const MIN_WIDTH = 1;
 export const MAX_WIDTH = 40;
 
-export function Toolbar({ tool, color, width, onToolChange, onColorChange, onWidthChange }: Props) {
+export function Toolbar({
+  tool,
+  color,
+  width,
+  onToolChange,
+  onColorChange,
+  onWidthChange,
+  onClear,
+  clearDisabled,
+}: Props) {
   return (
     <div className="toolbar" role="toolbar" aria-label="Drawing tools">
       <button
@@ -48,6 +60,9 @@ export function Toolbar({ tool, color, width, onToolChange, onColorChange, onWid
         />
         <span>{width}px</span>
       </label>
+      <button type="button" className="clear" disabled={clearDisabled} onClick={onClear}>
+        Clear
+      </button>
     </div>
   );
 }

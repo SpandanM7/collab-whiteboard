@@ -97,6 +97,7 @@ export const ERROR_CODES = [
   'duplicate_id',
   'unknown_stroke',
   'stroke_too_large',
+  'rate_limited',
   'internal',
 ] as const;
 

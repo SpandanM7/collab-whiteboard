@@ -32,6 +32,10 @@ body,
   cursor: cell;
 }
 
+.whiteboard.disabled {
+  cursor: not-allowed;
+}
+
 .toolbar {
   position: fixed;
   top: 16px;
@@ -120,12 +124,8 @@ body,
   background: #2fb344;
 }
 
-.connection-error {
-  padding: 6px 10px;
-  color: #b42318;
-  background: #fff;
-  border: 1px solid #f1b7b1;
-  border-radius: 8px;
+.connection-pill.reconnecting .connection-dot {
+  background: #e03131;
 }
 
 .landing {
@@ -197,10 +197,19 @@ body,
   border-radius: 6px;
 }
 
-.participants {
+.top-right {
   position: fixed;
   top: 16px;
   right: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  max-width: 220px;
+}
+
+.participants {
+  align-self: stretch;
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -261,4 +270,236 @@ input.participant-name:focus {
   flex: none;
   color: #777;
   font-size: 12px;
+}
+
+.toolbar button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.toolbar button.clear {
+  color: #b42318;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.share {
+  position: relative;
+}
+
+.share-button {
+  min-width: 84px;
+  padding: 8px 14px;
+  font: inherit;
+  color: #fff;
+  background: #1a1a1a;
+  border: 0;
+  border-radius: 10px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  cursor: pointer;
+}
+
+.share-manual {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  width: 280px;
+  padding: 10px;
+  background: #fff;
+  border: 1px solid #e5e4e7;
+  border-radius: 10px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+}
+
+.share-manual label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: #555;
+}
+
+.share-manual input,
+.join input {
+  padding: 8px 10px;
+  font: inherit;
+  color: inherit;
+  border: 1px solid #c9c8cc;
+  border-radius: 8px;
+}
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.82);
+  z-index: 10;
+}
+
+.overlay.delayed {
+  /* Fades in after a short delay so a fast connection never flashes it. */
+  animation: fade-in 0.3s 1.5s both;
+}
+
+.overlay-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  max-width: 340px;
+  padding: 24px;
+  text-align: center;
+  background: #fff;
+  border: 1px solid #e5e4e7;
+  border-radius: 14px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
+}
+
+.overlay-card h2,
+.overlay-card p {
+  margin: 0;
+}
+
+.overlay-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.overlay-actions button,
+.button,
+.dialog-actions button,
+.join button {
+  padding: 8px 14px;
+  font: inherit;
+  color: inherit;
+  text-decoration: none;
+  background: #f4f3ec;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.button.primary {
+  color: #fff;
+  background: #1a1a1a;
+}
+
+.dialog-actions .danger {
+  color: #fff;
+  background: #b42318;
+}
+
+.spinner {
+  width: 24px;
+  height: 24px;
+  border: 3px solid #e5e4e7;
+  border-top-color: #1a1a1a;
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+
+.offline-banner {
+  position: fixed;
+  bottom: 16px;
+  left: 50%;
+  max-width: calc(100vw - 32px);
+  padding: 10px 16px;
+  color: #7a2e0e;
+  text-align: center;
+  background: #fff4e5;
+  border: 1px solid #f5a524;
+  border-radius: 10px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  transform: translateX(-50%);
+  z-index: 5;
+}
+
+.dialog {
+  max-width: 360px;
+  padding: 20px;
+  color: inherit;
+  border: 1px solid #e5e4e7;
+  border-radius: 14px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+}
+
+.dialog::backdrop {
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.dialog h2 {
+  margin: 0 0 8px;
+}
+
+.dialog p {
+  margin: 0 0 16px;
+  color: #555;
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.toast-region {
+  position: fixed;
+  bottom: 16px;
+  left: 16px;
+  max-width: min(360px, calc(100vw - 32px));
+  z-index: 20;
+}
+
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  color: #b42318;
+  background: #fff;
+  border: 1px solid #f1b7b1;
+  border-radius: 10px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.14);
+}
+
+.toast button {
+  padding: 0 4px;
+  font-size: 18px;
+  line-height: 1;
+  color: inherit;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.join {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.form-error {
+  color: #b42318 !important;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
 }
