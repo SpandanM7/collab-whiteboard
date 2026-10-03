@@ -84,3 +84,78 @@ body,
   min-width: 3ch;
   font-variant-numeric: tabular-nums;
 }
+
+.connection {
+  position: fixed;
+  top: 16px;
+  left: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  max-width: 260px;
+  user-select: none;
+  pointer-events: none;
+}
+
+.connection-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: #fff;
+  border: 1px solid #e5e4e7;
+  border-radius: 999px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+}
+
+.connection-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #f5a524;
+}
+
+.connection-pill.connected .connection-dot {
+  background: #2fb344;
+}
+
+.connection-error {
+  padding: 6px 10px;
+  color: #b42318;
+  background: #fff;
+  border: 1px solid #f1b7b1;
+  border-radius: 8px;
+}
+
+.landing {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  height: 100%;
+  padding: 16px;
+  text-align: center;
+}
+
+.landing h1 {
+  margin: 0;
+  font-size: 2.5rem;
+}
+
+.landing p {
+  max-width: 36ch;
+  margin: 0 0 8px;
+  color: #555;
+}
+
+.landing .primary {
+  padding: 10px 20px;
+  font: inherit;
+  color: #fff;
+  background: #1a1a1a;
+  border: 0;
+  border-radius: 10px;
+  cursor: pointer;
+}

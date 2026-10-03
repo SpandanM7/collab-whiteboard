@@ -1,1 +1,3 @@
-export type { Point, Stroke } from './board.ts';
+export * from './board.ts';
+export * from './events.ts';
+export * from './limits.ts';
