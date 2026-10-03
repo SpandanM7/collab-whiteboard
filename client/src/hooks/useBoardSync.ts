@@ -3,7 +3,9 @@ import { io } from 'socket.io-client';
 import type { Socket } from 'socket.io-client';
 import { CLIENT_EVENTS, LIMITS, SERVER_EVENTS } from '@whiteboard/shared';
 import type { ClientToServerEvents, Point, ServerToClientEvents, Stroke } from '@whiteboard/shared';
+import type { Identity } from '../lib/identity.ts';
 import { boardReducer, initialBoardState } from './boardReducer.ts';
+import { initialPresenceState, presenceReducer } from './presenceReducer.ts';
 
 export type ConnectionStatus = 'connecting' | 'connected' | 'reconnecting';
 
@@ -12,13 +14,16 @@ type AppSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 /** How long local points are collected before being sent as one `stroke:points` message. */
 const BATCH_INTERVAL_MS = 25;
 
-/** Placeholder identity until M3 adds generated names and colors. */
-const GUEST = { name: 'Guest', color: '#1a1a1a' };
+/** Local cursor updates are sent at most this often (SPEC FR-4: about 30 to 60 ms). */
+const CURSOR_INTERVAL_MS = 40;
+/** How often idle remote cursors are checked for expiry. */
+const CURSOR_EXPIRY_CHECK_MS = 1000;
 
 const serverUrl = import.meta.env.VITE_SERVER_URL as string | undefined;
 
-export function useBoardSync(boardId: string) {
+export function useBoardSync(boardId: string, identity: Identity) {
   const [board, dispatch] = useReducer(boardReducer, initialBoardState);
+  const [presence, dispatchPresence] = useReducer(presenceReducer, initialPresenceState);
   const [status, setStatus] = useState<ConnectionStatus>('connecting');
   const [error, setError] = useState<string | null>(
     serverUrl ? null : 'VITE_SERVER_URL is not set. Copy client/.env.example to client/.env.',
@@ -29,6 +34,13 @@ export function useBoardSync(boardId: string) {
   const joinedRef = useRef(false);
   const pendingRef = useRef<{ id: string; points: Point[] } | null>(null);
   const flushTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  /** Latest identity, read when (re)joining so a reconnect uses the current name. */
+  const identityRef = useRef(identity);
+  const cursorRef = useRef<{
+    latest: Point | null;
+    lastSentAt: number;
+    timer: ReturnType<typeof setTimeout> | undefined;
+  }>({ latest: null, lastSentAt: 0, timer: undefined });
 
   const flushPoints = useCallback(() => {
     clearTimeout(flushTimerRef.current);
@@ -53,14 +65,17 @@ export function useBoardSync(boardId: string) {
     let everConnected = false;
 
     socket.on('connect', () => {
-      socket.emit(CLIENT_EVENTS.roomJoin, { boardId, ...GUEST });
+      // Fires on the first connection and on every reconnect: always (re)join the room.
+      socket.emit(CLIENT_EVENTS.roomJoin, { boardId, ...identityRef.current });
     });
 
-    // Sent on first join and again after every reconnect, replacing whatever we had.
-    socket.on(SERVER_EVENTS.roomState, ({ board: state }) => {
+    // Sent on first join and again after every reconnect (and rename), replacing what we had.
+    // Board and presence are replaced wholesale, so nothing is duplicated or left stale.
+    socket.on(SERVER_EVENTS.roomState, ({ board: state, participants }) => {
       everConnected = true;
       joinedRef.current = true;
       dispatch({ type: 'reset', elements: state.elements });
+      dispatchPresence({ type: 'reset', participants, selfId: socket.id, now: Date.now() });
       setStatus('connected');
       setError(null);
     });
@@ -72,6 +87,8 @@ export function useBoardSync(boardId: string) {
     socket.on('disconnect', (reason) => {
       joinedRef.current = false;
       pendingRef.current = null;
+      // Nobody is verifiably present while we are offline; room:state brings the real list back.
+      dispatchPresence({ type: 'reset', participants: [], selfId: undefined, now: Date.now() });
       setStatus('reconnecting');
       // The server closed the connection on purpose; the client does not retry that by itself.
       if (reason === 'io server disconnect') socket.connect();
@@ -95,13 +112,32 @@ export function useBoardSync(boardId: string) {
     socket.on(SERVER_EVENTS.strokeEnd, ({ id }) => dispatch({ type: 'remote-end', id }));
     socket.on(SERVER_EVENTS.elementDeleted, ({ id }) => dispatch({ type: 'delete', ids: [id] }));
     socket.on(SERVER_EVENTS.boardCleared, () => dispatch({ type: 'clear' }));
+    socket.on(SERVER_EVENTS.participantJoined, (participant) => {
+      dispatchPresence({ type: 'joined', participant, selfId: socket.id, now: Date.now() });
+    });
+    socket.on(SERVER_EVENTS.participantLeft, ({ clientId }) => {
+      dispatchPresence({ type: 'left', clientId });
+    });
+    socket.on(SERVER_EVENTS.cursorMoved, ({ clientId, point }) => {
+      dispatchPresence({ type: 'cursor', clientId, point, now: Date.now() });
+    });
     socket.on(SERVER_EVENTS.error, ({ code, message }) => {
       console.warn(`Server error (${code}): ${message}`);
       // Only join failures leave the user without a usable board; surface those.
       if (code === 'room_full' || code === 'server_full') setError(message);
     });
 
+    const expiryTimer = setInterval(
+      () => dispatchPresence({ type: 'expire', now: Date.now() }),
+      CURSOR_EXPIRY_CHECK_MS,
+    );
+
+    const cursor = cursorRef.current;
     return () => {
+      clearInterval(expiryTimer);
+      clearTimeout(cursor.timer);
+      cursor.timer = undefined;
+      cursor.latest = null;
       clearTimeout(flushTimerRef.current);
       flushTimerRef.current = undefined;
       pendingRef.current = null;
@@ -115,6 +151,36 @@ export function useBoardSync(boardId: string) {
     const socket = socketRef.current;
     return socket && joinedRef.current ? send(socket) : undefined;
   }, []);
+
+  // Renaming re-sends room:join; the server updates our entry and tells everyone else.
+  useEffect(() => {
+    identityRef.current = identity;
+    emitIfJoined((socket) => socket.emit(CLIENT_EVENTS.roomJoin, { boardId, ...identity }));
+    // Only a name/color change should re-join; boardId changes recreate the socket instead.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [identity.name, identity.color]);
+
+  const sendCursor = useCallback(() => {
+    const cursor = cursorRef.current;
+    cursor.timer = undefined;
+    const point = cursor.latest;
+    cursor.latest = null;
+    if (!point) return;
+    cursor.lastSentAt = performance.now();
+    emitIfJoined((socket) => socket.emit(CLIENT_EVENTS.cursorMove, { point }));
+  }, [emitIfJoined]);
+
+  /** The local pointer moved (board space). Throttled: at most one send per interval. */
+  const moveCursor = useCallback(
+    (point: Point) => {
+      const cursor = cursorRef.current;
+      cursor.latest = point;
+      if (cursor.timer !== undefined) return;
+      const wait = Math.max(0, CURSOR_INTERVAL_MS - (performance.now() - cursor.lastSentAt));
+      cursor.timer = setTimeout(sendCursor, wait);
+    },
+    [sendCursor],
+  );
 
   /** A local stroke began. It is already on screen; this tells everyone else. */
   const startStroke = useCallback(
@@ -179,8 +245,11 @@ export function useBoardSync(boardId: string) {
   return {
     strokes: board.committed,
     liveStrokes: board.live,
+    participants: presence.participants,
+    cursors: presence.cursors,
     status,
     error,
+    moveCursor,
     startStroke,
     addPoints,
     finishStroke,
