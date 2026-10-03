@@ -11,8 +11,11 @@ import type {
 export type RoomLimits = {
   maxPointsPerStroke: number;
   maxElementsPerBoard: number;
+  maxPointsPerBoard: number;
   maxRoomSize: number;
   maxBoards: number;
+  /** An empty board untouched for this long is dropped by `evictIdleBoards`. */
+  boardIdleTtlMs: number;
   /** A cursor with no update for this long is dropped by `sweepStaleCursors`. */
   cursorTtlMs: number;
 };
@@ -20,8 +23,10 @@ export type RoomLimits = {
 export const DEFAULT_ROOM_LIMITS: RoomLimits = {
   maxPointsPerStroke: LIMITS.maxPointsPerStroke,
   maxElementsPerBoard: LIMITS.maxElementsPerBoard,
+  maxPointsPerBoard: LIMITS.maxPointsPerBoard,
   maxRoomSize: LIMITS.maxRoomSize,
   maxBoards: LIMITS.maxBoards,
+  boardIdleTtlMs: LIMITS.boardIdleTtlMs,
   cursorTtlMs: LIMITS.cursorTtlMs,
 };
 
@@ -40,6 +45,8 @@ type Room = {
   board: Board;
   /** Index into `board.elements` by id; holds the same objects. */
   byId: Map<string, Stroke>;
+  /** Total points over all strokes, kept in step so the board's size is checked in O(1). */
+  pointCount: number;
   /** Strokes still being drawn: stroke id -> author client id. */
   active: Map<string, string>;
   /** Members' identity only; cursors live in `cursors` because they are ephemeral. */
@@ -80,6 +87,7 @@ export class Rooms {
       room = {
         board: { id: boardId, elements: [], createdAt: t, lastActiveAt: t },
         byId: new Map(),
+        pointCount: 0,
         active: new Map(),
         members: new Map(),
         cursors: new Map(),
@@ -134,6 +142,19 @@ export class Rooms {
     return ok(undefined);
   }
 
+  /** Drops boards nobody is in that have been idle past the TTL. Returns how many were dropped. */
+  evictIdleBoards(): number {
+    const cutoff = this.now() - this.limits.boardIdleTtlMs;
+    let dropped = 0;
+    for (const [boardId, room] of this.rooms) {
+      if (room.members.size === 0 && room.board.lastActiveAt <= cutoff) {
+        this.rooms.delete(boardId);
+        dropped++;
+      }
+    }
+    return dropped;
+  }
+
   /** Drops cursors that have not moved within the TTL. Returns how many were dropped. */
   sweepStaleCursors(): number {
     const cutoff = this.now() - this.limits.cursorTtlMs;
@@ -162,6 +183,8 @@ export class Rooms {
       );
     }
 
+    if (r.pointCount >= this.limits.maxPointsPerBoard) return this.boardTooBig();
+
     const stroke: Stroke = {
       id: payload.id,
       type: 'stroke',
@@ -174,6 +197,7 @@ export class Rooms {
     r.board.elements.push(stroke);
     r.byId.set(stroke.id, stroke);
     r.active.set(stroke.id, clientId);
+    r.pointCount += 1;
     this.touch(r);
     return ok(stroke);
   }
@@ -190,8 +214,11 @@ export class Rooms {
         `A stroke holds at most ${this.limits.maxPointsPerStroke} points.`,
       );
     }
+    const r = stroke.value.room;
+    if (r.pointCount + points.length > this.limits.maxPointsPerBoard) return this.boardTooBig();
     for (const p of points) s.points.push(p);
-    this.touch(stroke.value.room);
+    r.pointCount += points.length;
+    this.touch(r);
     return ok(s);
   }
 
@@ -212,7 +239,10 @@ export class Rooms {
     if (!room.ok) return room;
     const r = room.value;
 
-    if (!r.byId.delete(id)) return ok(false);
+    const removed = r.byId.get(id);
+    if (!removed) return ok(false);
+    r.byId.delete(id);
+    r.pointCount -= removed.points.length;
     r.board.elements = r.board.elements.filter((e) => e.id !== id);
     r.active.delete(id);
     this.touch(r);
@@ -226,9 +256,17 @@ export class Rooms {
 
     r.board.elements = [];
     r.byId.clear();
+    r.pointCount = 0;
     r.active.clear();
     this.touch(r);
     return ok(undefined);
+  }
+
+  private boardTooBig(): Result<never> {
+    return fail(
+      'board_full',
+      `A board holds at most ${this.limits.maxPointsPerBoard.toLocaleString('en-US')} points.`,
+    );
   }
 
   private memberRoom(boardId: string, clientId: string): Result<Room> {
