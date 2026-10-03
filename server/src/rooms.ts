@@ -13,6 +13,8 @@ export type RoomLimits = {
   maxElementsPerBoard: number;
   maxRoomSize: number;
   maxBoards: number;
+  /** A cursor with no update for this long is dropped by `sweepStaleCursors`. */
+  cursorTtlMs: number;
 };
 
 export const DEFAULT_ROOM_LIMITS: RoomLimits = {
@@ -20,6 +22,7 @@ export const DEFAULT_ROOM_LIMITS: RoomLimits = {
   maxElementsPerBoard: LIMITS.maxElementsPerBoard,
   maxRoomSize: LIMITS.maxRoomSize,
   maxBoards: LIMITS.maxBoards,
+  cursorTtlMs: LIMITS.cursorTtlMs,
 };
 
 export type RoomError = { code: ErrorCode; message: string };
@@ -39,7 +42,10 @@ type Room = {
   byId: Map<string, Stroke>;
   /** Strokes still being drawn: stroke id -> author client id. */
   active: Map<string, string>;
+  /** Members' identity only; cursors live in `cursors` because they are ephemeral. */
   members: Map<string, Participant>;
+  /** Last known cursor per member and when it arrived. Never part of the board. */
+  cursors: Map<string, { point: Point; at: number }>;
 };
 
 /**
@@ -76,6 +82,7 @@ export class Rooms {
         byId: new Map(),
         active: new Map(),
         members: new Map(),
+        cursors: new Map(),
       };
       this.rooms.set(boardId, room);
     }
@@ -83,22 +90,63 @@ export class Rooms {
     if (!room.members.has(participant.clientId) && room.members.size >= this.limits.maxRoomSize) {
       return fail('room_full', `This board already has ${this.limits.maxRoomSize} participants.`);
     }
-    room.members.set(participant.clientId, participant);
+    // Store only the identity fields; a cursor in the payload must not be persisted here.
+    room.members.set(participant.clientId, {
+      clientId: participant.clientId,
+      name: participant.name,
+      color: participant.color,
+    });
     this.touch(room);
 
     return ok({
       board: { ...room.board, elements: [...room.board.elements] },
-      participants: [...room.members.values()],
+      participants: this.participantsOf(room),
     });
   }
 
-  /** Removes a participant. Their strokes stay on the board, but can no longer be extended. */
-  leave(boardId: string, clientId: string): void {
+  /** The participant as others should see them (identity plus current cursor, if any). */
+  participant(boardId: string, clientId: string): Participant | undefined {
     const room = this.rooms.get(boardId);
-    if (!room?.members.delete(clientId)) return;
+    const member = room?.members.get(clientId);
+    if (!room || !member) return undefined;
+    return this.withCursor(room, member);
+  }
+
+  /**
+   * Removes a participant. Their strokes stay on the board, but can no longer be extended.
+   * Returns whether they were in the room, so callers only announce real departures.
+   */
+  leave(boardId: string, clientId: string): boolean {
+    const room = this.rooms.get(boardId);
+    if (!room?.members.delete(clientId)) return false;
+    room.cursors.delete(clientId);
     for (const [strokeId, authorId] of room.active) {
       if (authorId === clientId) room.active.delete(strokeId);
     }
+    return true;
+  }
+
+  /** Records a member's cursor. Cursors are relayed and kept for new joiners, never persisted. */
+  moveCursor(boardId: string, clientId: string, point: Point): Result<void> {
+    const room = this.memberRoom(boardId, clientId);
+    if (!room.ok) return room;
+    room.value.cursors.set(clientId, { point, at: this.now() });
+    return ok(undefined);
+  }
+
+  /** Drops cursors that have not moved within the TTL. Returns how many were dropped. */
+  sweepStaleCursors(): number {
+    const cutoff = this.now() - this.limits.cursorTtlMs;
+    let dropped = 0;
+    for (const room of this.rooms.values()) {
+      for (const [clientId, cursor] of room.cursors) {
+        if (cursor.at <= cutoff) {
+          room.cursors.delete(clientId);
+          dropped++;
+        }
+      }
+    }
+    return dropped;
   }
 
   startStroke(boardId: string, clientId: string, payload: StrokeStartPayload): Result<Stroke> {
@@ -201,6 +249,15 @@ export class Rooms {
       return fail('unknown_stroke', 'No such stroke in progress.');
     }
     return ok({ room: room.value, stroke });
+  }
+
+  private participantsOf(room: Room): Participant[] {
+    return [...room.members.values()].map((m) => this.withCursor(room, m));
+  }
+
+  private withCursor(room: Room, member: Participant): Participant {
+    const cursor = room.cursors.get(member.clientId);
+    return cursor ? { ...member, cursor: cursor.point } : { ...member };
   }
 
   private touch(room: Room): void {
