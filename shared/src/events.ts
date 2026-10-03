@@ -21,6 +21,7 @@ export const CLIENT_EVENTS = {
   strokeEnd: 'stroke:end',
   elementDelete: 'element:delete',
   boardClear: 'board:clear',
+  cursorMove: 'cursor:move',
 } as const;
 
 export const SERVER_EVENTS = {
@@ -30,6 +31,9 @@ export const SERVER_EVENTS = {
   strokeEnd: 'stroke:end',
   elementDeleted: 'element:deleted',
   boardCleared: 'board:cleared',
+  participantJoined: 'participant:joined',
+  participantLeft: 'participant:left',
+  cursorMoved: 'cursor:moved',
   error: 'error',
 } as const;
 
@@ -59,6 +63,8 @@ export const elementDeletePayload = z.object({ id: idSchema });
 
 export const boardClearPayload = z.object({});
 
+export const cursorMovePayload = z.object({ point: pointSchema });
+
 // ---- Server -> client payloads ----
 
 export const roomStatePayload = z.object({
@@ -74,6 +80,13 @@ export const strokeEndRelayPayload = strokeEndPayload.extend({ authorId: idSchem
 export const elementDeletedPayload = z.object({ id: idSchema });
 
 export const boardClearedPayload = z.object({});
+
+/** Also sent when a present participant changes their name, so receivers treat it as an upsert. */
+export const participantJoinedPayload = participantSchema;
+
+export const participantLeftPayload = z.object({ clientId: idSchema });
+
+export const cursorMovedPayload = z.object({ clientId: idSchema, point: pointSchema });
 
 export const ERROR_CODES = [
   'invalid_payload',
@@ -99,6 +112,7 @@ export type StrokePointsPayload = z.infer<typeof strokePointsPayload>;
 export type StrokeEndPayload = z.infer<typeof strokeEndPayload>;
 export type ElementDeletePayload = z.infer<typeof elementDeletePayload>;
 export type BoardClearPayload = z.infer<typeof boardClearPayload>;
+export type CursorMovePayload = z.infer<typeof cursorMovePayload>;
 
 export type RoomStatePayload = z.infer<typeof roomStatePayload>;
 export type StrokeStartRelayPayload = z.infer<typeof strokeStartRelayPayload>;
@@ -106,6 +120,9 @@ export type StrokePointsRelayPayload = z.infer<typeof strokePointsRelayPayload>;
 export type StrokeEndRelayPayload = z.infer<typeof strokeEndRelayPayload>;
 export type ElementDeletedPayload = z.infer<typeof elementDeletedPayload>;
 export type BoardClearedPayload = z.infer<typeof boardClearedPayload>;
+export type ParticipantJoinedPayload = z.infer<typeof participantJoinedPayload>;
+export type ParticipantLeftPayload = z.infer<typeof participantLeftPayload>;
+export type CursorMovedPayload = z.infer<typeof cursorMovedPayload>;
 export type ErrorCode = z.infer<typeof errorCodeSchema>;
 export type ErrorPayload = z.infer<typeof errorPayload>;
 
@@ -118,6 +135,7 @@ export interface ClientToServerEvents {
   [CLIENT_EVENTS.strokeEnd]: (payload: StrokeEndPayload) => void;
   [CLIENT_EVENTS.elementDelete]: (payload: ElementDeletePayload) => void;
   [CLIENT_EVENTS.boardClear]: (payload: BoardClearPayload) => void;
+  [CLIENT_EVENTS.cursorMove]: (payload: CursorMovePayload) => void;
 }
 
 export interface ServerToClientEvents {
@@ -127,5 +145,8 @@ export interface ServerToClientEvents {
   [SERVER_EVENTS.strokeEnd]: (payload: StrokeEndRelayPayload) => void;
   [SERVER_EVENTS.elementDeleted]: (payload: ElementDeletedPayload) => void;
   [SERVER_EVENTS.boardCleared]: (payload: BoardClearedPayload) => void;
+  [SERVER_EVENTS.participantJoined]: (payload: ParticipantJoinedPayload) => void;
+  [SERVER_EVENTS.participantLeft]: (payload: ParticipantLeftPayload) => void;
+  [SERVER_EVENTS.cursorMoved]: (payload: CursorMovedPayload) => void;
   [SERVER_EVENTS.error]: (payload: ErrorPayload) => void;
 }

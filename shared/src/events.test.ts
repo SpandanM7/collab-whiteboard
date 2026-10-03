@@ -2,6 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   LIMITS,
   boardClearPayload,
+  cursorMovePayload,
+  cursorMovedPayload,
+  participantJoinedPayload,
+  participantLeftPayload,
   elementDeletePayload,
   roomJoinPayload,
   strokeEndPayload,
@@ -109,5 +113,34 @@ describe('relay payloads', () => {
     expect(strokeStartRelayPayload.safeParse({ ...payload, authorId: undefined }).success).toBe(
       false,
     );
+  });
+});
+
+describe('presence payloads', () => {
+  it('validates cursor:move points', () => {
+    expect(cursorMovePayload.safeParse({ point }).success).toBe(true);
+    expect(cursorMovePayload.safeParse({ point: { x: NaN, y: 0 } }).success).toBe(false);
+    expect(
+      cursorMovePayload.safeParse({ point: { x: LIMITS.maxCoordinate + 1, y: 0 } }).success,
+    ).toBe(false);
+    expect(cursorMovePayload.safeParse({}).success).toBe(false);
+  });
+
+  it('strips a spoofed clientId from cursor:move', () => {
+    expect(cursorMovePayload.parse({ point, clientId: 'spoofed' })).not.toHaveProperty('clientId');
+  });
+
+  it('requires a client id on cursor:moved and participant:left', () => {
+    expect(cursorMovedPayload.safeParse({ clientId: 'abc', point }).success).toBe(true);
+    expect(cursorMovedPayload.safeParse({ point }).success).toBe(false);
+    expect(participantLeftPayload.safeParse({ clientId: 'abc' }).success).toBe(true);
+    expect(participantLeftPayload.safeParse({}).success).toBe(false);
+  });
+
+  it('accepts a participant with or without a cursor', () => {
+    const p = { clientId: 'abc', name: 'Quiet Otter', color: '#e03131' };
+    expect(participantJoinedPayload.safeParse(p).success).toBe(true);
+    expect(participantJoinedPayload.safeParse({ ...p, cursor: point }).success).toBe(true);
+    expect(participantJoinedPayload.safeParse({ ...p, name: ' ' }).success).toBe(false);
   });
 });
