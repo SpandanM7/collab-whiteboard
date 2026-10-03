@@ -8,6 +8,9 @@ import { registerSocketHandlers } from './socket.ts';
 /** Largest accepted socket message. A full 200-point batch is well under 10 KB. */
 const MAX_MESSAGE_BYTES = 64 * 1024;
 
+/** How often idle cursors are swept. Well under the TTL so they expire promptly. */
+const CURSOR_SWEEP_INTERVAL_MS = 2_000;
+
 export function createApp(config: Config) {
   const httpServer = createServer();
   const rooms = new Rooms();
@@ -25,6 +28,11 @@ export function createApp(config: Config) {
   });
 
   io.on('connection', (socket) => registerSocketHandlers(socket, rooms));
+
+  // Clients hide idle cursors on their own timer; this keeps stale ones out of room:state.
+  const sweepTimer = setInterval(() => rooms.sweepStaleCursors(), CURSOR_SWEEP_INTERVAL_MS);
+  sweepTimer.unref();
+  httpServer.on('close', () => clearInterval(sweepTimer));
 
   return { httpServer, io, rooms };
 }
