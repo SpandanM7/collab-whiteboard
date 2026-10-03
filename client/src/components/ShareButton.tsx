@@ -21,6 +21,16 @@ export function ShareButton({ boardId }: { boardId: string }) {
 
   const share = async () => {
     clearTimeout(timerRef.current);
+    // On touch devices the native share sheet (which includes "Copy") beats a silent clipboard copy.
+    if (navigator.share && window.matchMedia('(pointer: coarse)').matches) {
+      try {
+        await navigator.share({ url });
+        return;
+      } catch (err) {
+        if (err instanceof DOMException && err.name === 'AbortError') return; // user dismissed it
+        // Anything else: fall through to copying.
+      }
+    }
     if (await copyText(url)) {
       setState('copied');
       timerRef.current = setTimeout(() => setState('idle'), COPIED_MS);

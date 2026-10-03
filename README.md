@@ -53,6 +53,8 @@ npm run dev
 Open http://localhost:5173, click **New board**, and open the same link in a second tab or window.
 
 Other commands: `npm test` (Vitest), `npm run build`, `npm run format`.
+
+Mobile layout checks (phone, landscape phone, tablet, desktop; Playwright): run `npx playwright install chromium` once, then `npm run test:e2e -w client`. They start their own client on port 5199 and work without the server.
 Install dependencies into one package with `npm install <pkg> -w server` (or `-w client`) from
 the repo root.
 

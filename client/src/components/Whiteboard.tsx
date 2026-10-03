@@ -82,16 +82,25 @@ export function Whiteboard(props: Props) {
     const cache = document.createElement('canvas');
     cacheRef.current = cache;
 
+    // Sized from the canvas's own box (not window.innerWidth), which is what pointer positions are
+    // measured against. It also tracks the mobile URL bar showing/hiding and rotation.
     const resize = () => {
       const dpr = window.devicePixelRatio || 1;
-      canvas.width = cache.width = Math.round(window.innerWidth * dpr);
-      canvas.height = cache.height = Math.round(window.innerHeight * dpr);
+      const width = Math.round(canvas.clientWidth * dpr);
+      const height = Math.round(canvas.clientHeight * dpr);
+      // The cache is checked too: StrictMode re-runs this effect with a fresh, unsized cache.
+      if (width === canvas.width && height === canvas.height && width === cache.width) return;
+      canvas.width = cache.width = width;
+      canvas.height = cache.height = height;
       rebuildCache();
       paint();
     };
     resize();
-    window.addEventListener('resize', resize);
+    const observer = new ResizeObserver(resize);
+    observer.observe(canvas);
+    window.addEventListener('resize', resize); // DPR changes (browser zoom) do not resize the box
     return () => {
+      observer.disconnect();
       window.removeEventListener('resize', resize);
       cancelAnimationFrame(frameRef.current);
       frameRef.current = 0;
@@ -137,7 +146,7 @@ export function Whiteboard(props: Props) {
     pointerIdRef.current = e.pointerId;
     e.currentTarget.setPointerCapture(e.pointerId);
 
-    const point = toBoard(e);
+    const point = toBoard(e, e.currentTarget.getBoundingClientRect());
     const { tool, color, width } = propsRef.current;
     if (tool === 'eraser') {
       erase([point]);
@@ -157,11 +166,12 @@ export function Whiteboard(props: Props) {
   };
 
   const handlePointerMove = (e: PointerEvent<HTMLCanvasElement>) => {
-    propsRef.current.onCursorMove(toBoard(e));
+    const origin = e.currentTarget.getBoundingClientRect();
+    propsRef.current.onCursorMove(toBoard(e, origin));
     if (e.pointerId !== pointerIdRef.current) return;
     // Coalesced events recover samples the browser merged between frames.
     const samples = e.nativeEvent.getCoalescedEvents?.() ?? [];
-    const points = (samples.length > 0 ? samples : [e.nativeEvent]).map(toBoard);
+    const points = (samples.length > 0 ? samples : [e.nativeEvent]).map((s) => toBoard(s, origin));
 
     if (propsRef.current.tool === 'eraser') {
       erase(points);

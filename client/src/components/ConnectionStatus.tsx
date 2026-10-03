@@ -14,7 +14,7 @@ export function ConnectionStatus({ status, blocked, unsynced }: Props) {
       <div className="connection" role="status" aria-live="polite">
         <span className={`connection-pill ${pillState(status, unsynced)}`}>
           <span className="connection-dot" aria-hidden="true" />
-          {statusLabel(status, unsynced)}
+          <span className="connection-label">{statusLabel(status, unsynced)}</span>
         </span>
       </div>
       {blocked ? (

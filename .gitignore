@@ -152,3 +152,7 @@ CLAUDE.md
 SPEC.md
 
 DEPLOYMENT_NOTES.md
+
+# Playwright
+test-results/
+playwright-report/
