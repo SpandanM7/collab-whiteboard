@@ -3,13 +3,17 @@ export const LIMITS = {
   /** Max points in one `stroke:points` message. The client chunks batches to this size. */
   maxPointsPerMessage: 200,
   /** Max total points in a single stroke. */
-  maxPointsPerStroke: 20_000,
+  maxPointsPerStroke: 5_000,
   /** Max elements on one board (see SPEC.md section 5). */
-  maxElementsPerBoard: 5_000,
+  maxElementsPerBoard: 2_000,
+  /** Max points across all strokes of one board: bounds a board's memory (about 40 B a point). */
+  maxPointsPerBoard: 100_000,
   /** Max participants in one room (see SPEC.md section 5). */
   maxRoomSize: 10,
   /** Max boards held in server memory at once. */
-  maxBoards: 200,
+  maxBoards: 30,
+  /** A board nobody is in is dropped from memory after this long without activity. */
+  boardIdleTtlMs: 6 * 60 * 60 * 1000,
   /** Coordinates must be within +/- this value in board space. */
   maxCoordinate: 1_000_000,
   maxStrokeWidth: 100,

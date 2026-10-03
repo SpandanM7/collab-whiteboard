@@ -391,3 +391,84 @@ describe('replaying a stroke after its author dropped', () => {
     expect(expectOk(rooms.deleteElement(BOARD, 'alice', 'never-sent'))).toBe(false);
   });
 });
+
+describe('board point budget', () => {
+  it('rejects points beyond the per-board total, across strokes', () => {
+    const rooms = makeRooms({ maxPointsPerBoard: 5 });
+    rooms.join(BOARD, alice);
+    expectOk(rooms.startStroke(BOARD, 'alice', start('s1'))); // 1 point
+    expectOk(
+      rooms.appendPoints(BOARD, 'alice', 's1', [
+        { x: 1, y: 0 },
+        { x: 2, y: 0 },
+      ]),
+    ); // 3
+    expectOk(rooms.startStroke(BOARD, 'alice', start('s2'))); // 4
+    expectError(
+      rooms.appendPoints(BOARD, 'alice', 's2', [
+        { x: 1, y: 0 },
+        { x: 2, y: 0 },
+      ]),
+      'board_full',
+    );
+    expectOk(rooms.appendPoints(BOARD, 'alice', 's2', [{ x: 1, y: 0 }])); // exactly 5
+    expectOk(rooms.endStroke(BOARD, 'alice', 's2'));
+    expectError(rooms.startStroke(BOARD, 'alice', start('s3')), 'board_full');
+  });
+
+  it('frees budget when strokes are erased or the board is cleared', () => {
+    const rooms = makeRooms({ maxPointsPerBoard: 2 });
+    rooms.join(BOARD, alice);
+    expectOk(rooms.startStroke(BOARD, 'alice', start('s1')));
+    expectOk(rooms.appendPoints(BOARD, 'alice', 's1', [{ x: 1, y: 0 }]));
+    expectError(rooms.startStroke(BOARD, 'alice', start('s2')), 'board_full');
+
+    expectOk(rooms.deleteElement(BOARD, 'alice', 's1'));
+    expectOk(rooms.startStroke(BOARD, 'alice', start('s2')));
+    expectOk(rooms.appendPoints(BOARD, 'alice', 's2', [{ x: 1, y: 0 }]));
+    expectError(rooms.startStroke(BOARD, 'alice', start('s3')), 'board_full');
+
+    expectOk(rooms.clearBoard(BOARD, 'alice'));
+    expectOk(rooms.startStroke(BOARD, 'alice', start('s3')));
+  });
+});
+
+describe('evictIdleBoards', () => {
+  function clocked(boardIdleTtlMs: number) {
+    const clock = { t: 0 };
+    const rooms = new Rooms({ ...DEFAULT_ROOM_LIMITS, boardIdleTtlMs }, () => clock.t);
+    return { rooms, clock };
+  }
+
+  it('drops an empty board once it has been idle past the TTL', () => {
+    const { rooms, clock } = clocked(100);
+    rooms.join(BOARD, alice);
+    rooms.leave(BOARD, 'alice');
+    clock.t = 99;
+    expect(rooms.evictIdleBoards()).toBe(0);
+    clock.t = 100;
+    expect(rooms.evictIdleBoards()).toBe(1);
+    expect(rooms.boardCount).toBe(0);
+  });
+
+  it('keeps a board that still has someone in it, however idle', () => {
+    const { rooms, clock } = clocked(100);
+    rooms.join(BOARD, alice);
+    clock.t = 10_000;
+    expect(rooms.evictIdleBoards()).toBe(0);
+  });
+
+  it('frees a slot so a new board can be created again', () => {
+    const clock = { t: 0 };
+    const rooms = new Rooms(
+      { ...DEFAULT_ROOM_LIMITS, maxBoards: 1, boardIdleTtlMs: 100 },
+      () => clock.t,
+    );
+    rooms.join('board-aaaaaaa', alice);
+    rooms.leave('board-aaaaaaa', 'alice');
+    expectError(rooms.join('board-bbbbbbb', bob), 'server_full');
+    clock.t = 200;
+    rooms.evictIdleBoards();
+    expectOk(rooms.join('board-bbbbbbb', bob));
+  });
+});

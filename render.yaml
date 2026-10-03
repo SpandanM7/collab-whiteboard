@@ -1,0 +1,28 @@
+# Render Blueprint for the server (the client is deployed on Vercel, see client/vercel.json).
+# The service builds from the repo root because the server needs the workspace install and
+# `shared/`. Build filters keep client-only commits from restarting it, which would wipe the
+# in-memory boards.
+services:
+  - type: web
+    name: collab-whiteboard-server
+    runtime: node
+    plan: free
+    # --include=dev: the build needs tsup and TypeScript, which are dev dependencies.
+    buildCommand: npm ci --include=dev && npm run build -w server
+    startCommand: npm run start -w server
+    healthCheckPath: /health
+    autoDeploy: true
+    buildFilter:
+      paths:
+        - server/**
+        - shared/**
+        - package.json
+        - package-lock.json
+    envVars:
+      - key: NODE_VERSION
+        value: 22
+      # Comma-separated allowed browser origins, e.g. https://whiteboard.vercel.app
+      # (see server/.env.example). Asked for when the Blueprint is created.
+      - key: CLIENT_URL
+        sync: false
+      # PORT is set by Render itself.

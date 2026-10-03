@@ -22,7 +22,7 @@ let clients: Client[] = [];
 let url = '';
 
 async function start(rateLimit?: RateLimit) {
-  app = createApp({ port: 0, clientUrl: 'http://localhost:5173' }, rateLimit);
+  app = createApp({ port: 0, clientOrigins: ['http://localhost:5173'] }, rateLimit);
   await new Promise<void>((resolve) => app.httpServer.listen(0, resolve));
   url = `http://localhost:${(app.httpServer.address() as AddressInfo).port}`;
 }
@@ -176,5 +176,48 @@ describe('replaying an unsynced stroke', () => {
     const late = await join('Cy');
     expect(late.state.board.elements).toHaveLength(1);
     expect(late.state.board.elements[0]?.points).toHaveLength(4);
+  });
+});
+
+describe('http', () => {
+  beforeEach(() => start());
+
+  it('answers /health for the host and 404s everything else', async () => {
+    const ok = await fetch(`${url}/health`);
+    expect(ok.status).toBe(200);
+    expect(await ok.json()).toEqual({ status: 'ok' });
+    expect((await fetch(`${url}/`)).status).toBe(404);
+  });
+
+  it('still serves the socket handshake next to the health route', async () => {
+    const { state } = await join('Ann');
+    expect(state.board.id).toBe(BOARD);
+  });
+});
+
+describe('origin check', () => {
+  async function tryConnect(origin: string | undefined, origins: string[]) {
+    app = createApp({ port: 0, clientOrigins: origins });
+    await new Promise<void>((resolve) => app.httpServer.listen(0, resolve));
+    url = `http://localhost:${(app.httpServer.address() as AddressInfo).port}`;
+    const client: Client = connect(url, {
+      transports: ['websocket'],
+      reconnection: false,
+      extraHeaders: origin ? { Origin: origin } : {},
+    });
+    clients.push(client);
+    return new Promise<boolean>((resolve) => {
+      client.on('connect', () => resolve(true));
+      client.on('connect_error', () => resolve(false));
+    });
+  }
+
+  it('accepts any configured origin, including a preview pattern', async () => {
+    const origins = ['https://app.example.com', 'https://wb-*-team.vercel.app'];
+    expect(await tryConnect('https://wb-git-fix-team.vercel.app', origins)).toBe(true);
+  });
+
+  it('rejects other browser origins but allows clients that send no Origin', async () => {
+    expect(await tryConnect('https://evil.example.com', ['https://app.example.com'])).toBe(false);
   });
 });
