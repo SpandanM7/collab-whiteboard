@@ -23,8 +23,15 @@ export function boardReducer(state: BoardState, action: BoardAction): BoardState
     case 'reset':
       return { committed: action.elements, live: [] };
 
-    case 'add-local':
-      return { ...state, committed: [...state.committed, action.stroke] };
+    // Upsert: after a reconnect, room:state can already hold the partial copy of a stroke that
+    // is still being finished locally; the local copy is the complete one.
+    case 'add-local': {
+      const { stroke } = action;
+      const committed = state.committed.some((s) => s.id === stroke.id)
+        ? state.committed.map((s) => (s.id === stroke.id ? stroke : s))
+        : [...state.committed, stroke];
+      return { ...state, committed };
+    }
 
     case 'remote-start': {
       const known = [...state.committed, ...state.live].some((s) => s.id === action.stroke.id);

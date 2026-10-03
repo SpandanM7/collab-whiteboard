@@ -88,4 +88,14 @@ describe('boardReducer', () => {
     expect(state.committed.map((s) => s.id)).toEqual(['server']);
     expect(state.live).toEqual([]);
   });
+
+  it('does not duplicate a local stroke the server already sent back in room:state', () => {
+    const partial = stroke('s1', [0, 1]);
+    const state = run([
+      { type: 'reset', elements: [partial] },
+      { type: 'add-local', stroke: stroke('s1', [0, 1, 2, 3]) },
+    ]);
+    expect(state.committed).toHaveLength(1);
+    expect(state.committed[0].points).toHaveLength(4);
+  });
 });
