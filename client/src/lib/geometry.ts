@@ -19,3 +19,41 @@ export function strokeHit(stroke: Stroke, p: Point, radius: number): boolean {
   }
   return false;
 }
+
+export type Rect = { left: number; top: number; right: number; bottom: number };
+
+const boundsCache = new WeakMap<Stroke, { count: number; rect: Rect }>();
+
+/** The stroke's bounding box in board space, line width included. Cached until the stroke grows. */
+export function strokeBounds(stroke: Stroke): Rect {
+  const { points, width } = stroke;
+  const cached = boundsCache.get(stroke);
+  if (cached && cached.count === points.length) return cached.rect;
+  let left = Infinity;
+  let top = Infinity;
+  let right = -Infinity;
+  let bottom = -Infinity;
+  for (const p of points) {
+    if (p.x < left) left = p.x;
+    if (p.x > right) right = p.x;
+    if (p.y < top) top = p.y;
+    if (p.y > bottom) bottom = p.y;
+  }
+  const pad = width / 2;
+  const rect = { left: left - pad, top: top - pad, right: right + pad, bottom: bottom + pad };
+  boundsCache.set(stroke, { count: points.length, rect });
+  return rect;
+}
+
+export function rectsIntersect(a: Rect, b: Rect): boolean {
+  return a.left <= b.right && b.left <= a.right && a.top <= b.bottom && b.top <= a.bottom;
+}
+
+export function rectContains(outer: Rect, inner: Rect): boolean {
+  return (
+    inner.left >= outer.left &&
+    inner.right <= outer.right &&
+    inner.top >= outer.top &&
+    inner.bottom <= outer.bottom
+  );
+}
