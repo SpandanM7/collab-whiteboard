@@ -81,6 +81,20 @@ export function Toolbar({
         </Icon>
         <span className="label">Eraser</span>
       </button>
+      <button
+        type="button"
+        className={tool === 'hand' ? 'active' : ''}
+        aria-pressed={tool === 'hand'}
+        onClick={() => onToolChange('hand')}
+      >
+        <Icon>
+          <path d="M18 11V6a2 2 0 0 0-4 0" />
+          <path d="M14 10V4a2 2 0 0 0-4 0v2" />
+          <path d="M10 10.5V6a2 2 0 0 0-4 0v8" />
+          <path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.9-5.9-2.4L3.4 16a2 2 0 0 1 3.2-2.4L8 15" />
+        </Icon>
+        <span className="label">Hand</span>
+      </button>
       <label className="color">
         <input
           type="color"
