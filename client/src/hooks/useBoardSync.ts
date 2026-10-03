@@ -2,7 +2,13 @@ import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { io } from 'socket.io-client';
 import type { Socket } from 'socket.io-client';
 import { CLIENT_EVENTS, LIMITS, SERVER_EVENTS } from '@whiteboard/shared';
-import type { ClientToServerEvents, Point, ServerToClientEvents, Stroke } from '@whiteboard/shared';
+import type {
+  ClientToServerEvents,
+  ErrorCode,
+  Point,
+  ServerToClientEvents,
+  Stroke,
+} from '@whiteboard/shared';
 import type { Identity } from '../lib/identity.ts';
 import { boardReducer, initialBoardState } from './boardReducer.ts';
 import { initialPresenceState, presenceReducer } from './presenceReducer.ts';
@@ -19,15 +25,30 @@ const CURSOR_INTERVAL_MS = 40;
 /** How often idle remote cursors are checked for expiry. */
 const CURSOR_EXPIRY_CHECK_MS = 1000;
 
+/** Errors that are expected during a rejoin or a race between users: logged, not shown. */
+const QUIET_ERRORS: ReadonlySet<ErrorCode> = new Set([
+  'unknown_stroke',
+  'duplicate_id',
+  'not_in_room',
+]);
+
+/** Errors that mean we have no usable board at all, so the UI blocks instead of toasting. */
+const JOIN_ERRORS: ReadonlySet<ErrorCode> = new Set(['room_full', 'server_full']);
+
+export type Toast = { id: number; message: string };
+
 const serverUrl = import.meta.env.VITE_SERVER_URL as string | undefined;
 
 export function useBoardSync(boardId: string, identity: Identity) {
   const [board, dispatch] = useReducer(boardReducer, initialBoardState);
   const [presence, dispatchPresence] = useReducer(presenceReducer, initialPresenceState);
   const [status, setStatus] = useState<ConnectionStatus>('connecting');
-  const [error, setError] = useState<string | null>(
+  /** Why we cannot use this board at all (full room, bad config). Null while all is well. */
+  const [blocked, setBlocked] = useState<string | null>(
     serverUrl ? null : 'VITE_SERVER_URL is not set. Copy client/.env.example to client/.env.',
   );
+  const [toast, setToast] = useState<Toast | null>(null);
+  const toastIdRef = useRef(0);
 
   const socketRef = useRef<AppSocket | null>(null);
   /** True between receiving room:state and the next disconnect: the server knows about us. */
@@ -77,7 +98,7 @@ export function useBoardSync(boardId: string, identity: Identity) {
       dispatch({ type: 'reset', elements: state.elements });
       dispatchPresence({ type: 'reset', participants, selfId: socket.id, now: Date.now() });
       setStatus('connected');
-      setError(null);
+      setBlocked(null);
     });
 
     socket.on('connect_error', () => {
@@ -123,8 +144,8 @@ export function useBoardSync(boardId: string, identity: Identity) {
     });
     socket.on(SERVER_EVENTS.error, ({ code, message }) => {
       console.warn(`Server error (${code}): ${message}`);
-      // Only join failures leave the user without a usable board; surface those.
-      if (code === 'room_full' || code === 'server_full') setError(message);
+      if (JOIN_ERRORS.has(code)) setBlocked(message);
+      else if (!QUIET_ERRORS.has(code)) setToast({ id: ++toastIdRef.current, message });
     });
 
     const expiryTimer = setInterval(
@@ -248,7 +269,9 @@ export function useBoardSync(boardId: string, identity: Identity) {
     participants: presence.participants,
     cursors: presence.cursors,
     status,
-    error,
+    blocked,
+    toast,
+    dismissToast: useCallback(() => setToast(null), []),
     moveCursor,
     startStroke,
     addPoints,
