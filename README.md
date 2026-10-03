@@ -18,6 +18,7 @@ cursors and presence. No account needed.
 - Connection states (connecting / connected / reconnecting); drawing pauses while offline
 - Automatic rejoin and full board state on reconnect
 - Server-side validation, size limits and per-socket rate limiting
+- Pan and zoom, per person (an infinite canvas): wheel or trackpad, Space + drag, the Hand tool, two-finger drag and pinch on touch screens, zoom buttons, and Fit all. Markers at the screen edge point to people who are off screen; click one to jump to them
 - Works with mouse, touch and pen (pointer events)
 
 ## Tech stack
