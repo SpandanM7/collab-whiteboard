@@ -7,13 +7,16 @@ import { ShareButton } from '../components/ShareButton.tsx';
 import { Toast } from '../components/Toast.tsx';
 import { Toolbar } from '../components/Toolbar.tsx';
 import { Whiteboard } from '../components/Whiteboard.tsx';
+import { ZoomControls } from '../components/ZoomControls.tsx';
 import { useBoardSync } from '../hooks/useBoardSync.ts';
+import { useBoardView } from '../hooks/useBoardView.ts';
 import { loadIdentity, saveIdentity } from '../lib/identity.ts';
 import type { Tool } from '../types.ts';
 
 export function BoardPage({ boardId }: { boardId: string }) {
   const [identity, setIdentity] = useState(() => loadIdentity());
   const sync = useBoardSync(boardId, identity);
+  const board = useBoardView(sync.strokes);
   const [tool, setTool] = useState<Tool>('pen');
   const [color, setColor] = useState('#1a1a1a');
   const [width, setWidth] = useState(4);
@@ -30,15 +33,25 @@ export function BoardPage({ boardId }: { boardId: string }) {
         tool={tool}
         color={color}
         width={width}
+        view={board.view}
+        onViewChange={board.changeView}
         disabled={sync.blocked !== null}
-        onStrokeStart={sync.startStroke}
+        onStrokeStart={(stroke) => {
+          board.markInteracted();
+          sync.startStroke(stroke);
+        }}
         onStrokePoints={sync.addPoints}
         onStrokeAdd={sync.finishStroke}
         onStrokeCancel={sync.cancelStroke}
         onStrokesErase={sync.deleteElements}
         onCursorMove={sync.moveCursor}
       />
-      <CursorLayer participants={sync.participants} cursors={sync.cursors} />
+      <CursorLayer
+        participants={sync.participants}
+        cursors={sync.cursors}
+        view={board.view}
+        onJumpTo={board.jumpTo}
+      />
       <Toolbar
         tool={tool}
         color={color}
@@ -48,6 +61,13 @@ export function BoardPage({ boardId }: { boardId: string }) {
         onWidthChange={setWidth}
         onClear={() => setConfirmingClear(true)}
         clearDisabled={!online}
+      />
+      <ZoomControls
+        scale={board.view.scale}
+        onZoomIn={board.zoomIn}
+        onZoomOut={board.zoomOut}
+        onReset={board.resetZoom}
+        onFit={board.fitAll}
       />
       <div className="top-right">
         <ShareButton boardId={boardId} />

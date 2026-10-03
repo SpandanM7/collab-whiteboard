@@ -19,6 +19,10 @@ export default defineConfig({
     { name: 'phone', use: { ...devices['iPhone SE'], browserName: 'chromium' } },
     { name: 'phone-landscape', use: { ...devices['Pixel 7 landscape'], browserName: 'chromium' } },
     { name: 'tablet', use: { ...devices['iPad Mini'], browserName: 'chromium' } },
+    {
+      name: 'tablet-landscape',
+      use: { ...devices['iPad Pro 11 landscape'], browserName: 'chromium' },
+    },
     { name: 'desktop', use: { ...devices['Desktop Chrome'] } },
   ],
 });

@@ -102,12 +102,22 @@ test('touch targets are at least 44px on touch devices', async ({ page }) => {
 test('strokes land under the pointer, including the far right and bottom', async ({ page }) => {
   await open(page);
   const { width, height } = page.viewportSize()!;
-  // Keep clear of the toolbar, which is on top (desktop) or on the bottom edge (compact).
+  // Floating controls sit on top of the canvas, so only use spots where the canvas is what is hit.
+  const onCanvas = (x: number, y: number) =>
+    page.evaluate(
+      ([px, py]) => document.elementFromPoint(px, py) === document.querySelector('canvas'),
+      [x, y],
+    );
+  const freeSpot = async (x: number, candidates: number[]) => {
+    for (const y of candidates) if (await onCanvas(x, y)) return { x, y };
+    throw new Error(`no free canvas spot at x=${x}`);
+  };
+  const mid = Math.round(height / 2);
   const spots = [
-    { x: 24, y: Math.round(height / 2) },
-    { x: Math.round(width / 2), y: Math.round(height / 2) },
-    { x: width - 24, y: Math.round(height / 2) },
-    { x: width - 24, y: height - 130 },
+    await freeSpot(24, [mid, 120]),
+    await freeSpot(Math.round(width / 2), [mid, 120]),
+    await freeSpot(width - 24, [mid, height - 130, 100, height - 90, 300]),
+    await freeSpot(width - 24, [height - 130, height - 90, 100, mid, 300]),
   ];
   for (const spot of spots) {
     await page.mouse.move(spot.x - 10, spot.y);

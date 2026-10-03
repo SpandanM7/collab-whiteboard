@@ -1,1 +1,1 @@
-export type Tool = 'pen' | 'eraser';
+export type Tool = 'pen' | 'eraser' | 'hand';
