@@ -355,3 +355,39 @@ describe('cursors', () => {
     expect(cursorOf(rooms, 'alice')).toBeUndefined();
   });
 });
+
+describe('replaying a stroke after its author dropped', () => {
+  // The client replays unsynced work as a new author. This pins down the protocol it relies on.
+  it('lets a new member replace the truncated copy a departed author left behind', () => {
+    const rooms = makeRooms();
+    rooms.join(BOARD, alice);
+    expectOk(rooms.startStroke(BOARD, 'alice', start('s1')));
+    expectOk(rooms.appendPoints(BOARD, 'alice', 's1', [{ x: 1, y: 1 }]));
+    rooms.leave(BOARD, 'alice');
+
+    rooms.join(BOARD, bob);
+    expectError(rooms.appendPoints(BOARD, 'bob', 's1', [{ x: 2, y: 2 }]), 'unknown_stroke');
+    expectError(rooms.startStroke(BOARD, 'bob', start('s1')), 'duplicate_id');
+
+    expect(expectOk(rooms.deleteElement(BOARD, 'bob', 's1'))).toBe(true);
+    expectOk(rooms.startStroke(BOARD, 'bob', start('s1')));
+    expectOk(
+      rooms.appendPoints(BOARD, 'bob', 's1', [
+        { x: 1, y: 1 },
+        { x: 2, y: 2 },
+      ]),
+    );
+    expectOk(rooms.endStroke(BOARD, 'bob', 's1'));
+
+    const { board } = expectOk(rooms.join(BOARD, bob));
+    expect(board.elements).toHaveLength(1);
+    expect(board.elements[0]?.points).toHaveLength(3);
+    expect(board.elements[0]?.authorId).toBe('bob');
+  });
+
+  it('treats erasing an id the server never saw as a no-op', () => {
+    const rooms = makeRooms();
+    rooms.join(BOARD, alice);
+    expect(expectOk(rooms.deleteElement(BOARD, 'alice', 'never-sent'))).toBe(false);
+  });
+});

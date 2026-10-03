@@ -146,3 +146,35 @@ describe('rate limiting', () => {
     await moved;
   });
 });
+
+describe('replaying an unsynced stroke', () => {
+  beforeEach(() => start());
+
+  it('replaces the partial copy left by a dropped author, for everyone', async () => {
+    const watcher = await join('Wes');
+    const ann = await join('Ann');
+    const id = 'stroke-1';
+    const p = (x: number) => ({ x, y: 0 });
+    const base = { id, color: '#000000', width: 4 };
+
+    ann.client.emit(CLIENT_EVENTS.strokeStart, { ...base, point: p(0) });
+    const sawPoints = next(watcher.client, SERVER_EVENTS.strokePoints);
+    ann.client.emit(CLIENT_EVENTS.strokePoints, { id, points: [p(1)] });
+    await sawPoints;
+    ann.client.disconnect();
+
+    // Ann comes back as a new socket and replays the whole stroke.
+    const again = await join('Ann');
+    expect(again.state.board.elements[0]?.points).toHaveLength(2);
+    const ended = next(watcher.client, SERVER_EVENTS.strokeEnd);
+    again.client.emit(CLIENT_EVENTS.elementDelete, { id });
+    again.client.emit(CLIENT_EVENTS.strokeStart, { ...base, point: p(0) });
+    again.client.emit(CLIENT_EVENTS.strokePoints, { id, points: [p(1), p(2), p(3)] });
+    again.client.emit(CLIENT_EVENTS.strokeEnd, { id });
+    await ended;
+
+    const late = await join('Cy');
+    expect(late.state.board.elements).toHaveLength(1);
+    expect(late.state.board.elements[0]?.points).toHaveLength(4);
+  });
+});
