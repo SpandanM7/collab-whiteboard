@@ -4,7 +4,9 @@ import type { Socket } from 'socket.io-client';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { CLIENT_EVENTS, LIMITS, SERVER_EVENTS } from '@whiteboard/shared';
 import type {
+  BoardElement,
   ClientToServerEvents,
+  ElementAddedPayload,
   ErrorPayload,
   RoomStatePayload,
   ServerToClientEvents,
@@ -40,6 +42,8 @@ async function join(name: string): Promise<{ client: Client; state: RoomStatePay
 
 const next = <T>(client: Client, event: keyof ServerToClientEvents) =>
   new Promise<T>((resolve) => (client as Socket).once(event, resolve));
+
+const pointsOf = (element?: BoardElement) => (element?.type === 'stroke' ? element.points : []);
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -165,7 +169,7 @@ describe('replaying an unsynced stroke', () => {
 
     // Ann comes back as a new socket and replays the whole stroke.
     const again = await join('Ann');
-    expect(again.state.board.elements[0]?.points).toHaveLength(2);
+    expect(pointsOf(again.state.board.elements[0])).toHaveLength(2);
     const ended = next(watcher.client, SERVER_EVENTS.strokeEnd);
     again.client.emit(CLIENT_EVENTS.elementDelete, { id });
     again.client.emit(CLIENT_EVENTS.strokeStart, { ...base, point: p(0) });
@@ -175,7 +179,61 @@ describe('replaying an unsynced stroke', () => {
 
     const late = await join('Cy');
     expect(late.state.board.elements).toHaveLength(1);
-    expect(late.state.board.elements[0]?.points).toHaveLength(4);
+    expect(pointsOf(late.state.board.elements[0])).toHaveLength(4);
+  });
+});
+
+describe('element:add', () => {
+  beforeEach(() => start());
+
+  const shape = {
+    id: 'shape-1',
+    type: 'ellipse' as const,
+    color: '#112233',
+    width: 3,
+    fill: '#ffeecc',
+    start: { x: 0, y: 0 },
+    end: { x: 40, y: 20 },
+  };
+
+  it('relays the stored shape to others (not the sender) and restores it for later joiners', async () => {
+    const a = await join('Ann');
+    const b = await join('Bob');
+    let echoed = false;
+    a.client.on(SERVER_EVENTS.elementAdded, () => (echoed = true));
+
+    const relayed = next<ElementAddedPayload>(b.client, SERVER_EVENTS.elementAdded);
+    a.client.emit(CLIENT_EVENTS.elementAdd, shape);
+    expect(await relayed).toMatchObject({ ...shape, authorId: a.client.id });
+
+    const late = await join('Cy');
+    expect(late.state.board.elements).toMatchObject([shape]);
+    expect(echoed).toBe(false);
+  });
+
+  it('ignores an authorId sent by the client', async () => {
+    const a = await join('Ann');
+    const b = await join('Bob');
+    const relayed = next<ElementAddedPayload>(b.client, SERVER_EVENTS.elementAdded);
+    (a.client as Socket).emit(CLIENT_EVENTS.elementAdd, { ...shape, authorId: 'someone-else' });
+    expect((await relayed).authorId).toBe(a.client.id);
+  });
+
+  it.each([
+    ['unknown type', { ...shape, type: 'triangle' }],
+    ['bad color', { ...shape, color: 'red' }],
+    ['coordinate out of range', { ...shape, end: { x: 1e9, y: 0 } }],
+    ['missing end point', { ...shape, end: undefined }],
+  ])('rejects %s without relaying it', async (_label, payload) => {
+    const a = await join('Ann');
+    const b = await join('Bob');
+    let relayed = false;
+    b.client.on(SERVER_EVENTS.elementAdded, () => (relayed = true));
+    const error = next<ErrorPayload>(a.client, SERVER_EVENTS.error);
+    (a.client as Socket).emit(CLIENT_EVENTS.elementAdd, payload);
+    expect((await error).code).toBe('invalid_payload');
+    await sleep(50);
+    expect(relayed).toBe(false);
   });
 });
 

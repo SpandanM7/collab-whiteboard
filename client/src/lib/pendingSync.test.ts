@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { CLIENT_EVENTS, LIMITS } from '@whiteboard/shared';
-import type { Stroke } from '@whiteboard/shared';
-import { PendingSync, strokeJob } from './pendingSync.ts';
+import type { BoardElement, Shape, Stroke } from '@whiteboard/shared';
+import { PendingSync, shapeJob, strokeJob } from './pendingSync.ts';
 
 const stroke = (id: string, pointCount = 3, authorId = 'someone'): Stroke => ({
   id,
@@ -12,6 +12,23 @@ const stroke = (id: string, pointCount = 3, authorId = 'someone'): Stroke => ({
   points: Array.from({ length: pointCount }, (_, i) => ({ x: i, y: 0 })),
   createdAt: 0,
 });
+
+const shape = (id: string, type: Shape['type'] = 'rect'): Shape => {
+  const common = {
+    id,
+    authorId: 'someone',
+    color: '#112233',
+    width: 2,
+    start: { x: 0, y: 0 },
+    end: { x: 10, y: 5 },
+    createdAt: 0,
+  };
+  return type === 'rect' || type === 'ellipse'
+    ? { ...common, type, fill: '#ffeecc' }
+    : { ...common, type };
+};
+
+const pointsOf = (element?: BoardElement) => (element?.type === 'stroke' ? element.points : []);
 
 const events = (messages: { event: string }[]) => messages.map((m) => m.event);
 
@@ -95,7 +112,7 @@ describe('PendingSync.reconcile', () => {
     pending.addStroke(stroke('mine', 10), true);
     const result = pending.reconcile([stroke('other'), stroke('mine', 4, 'old-socket')]);
     expect(result.elements.map((e) => e.id)).toEqual(['other', 'mine']);
-    expect(result.elements[1]?.points).toHaveLength(10);
+    expect(pointsOf(result.elements[1])).toHaveLength(10);
     expect(result.jobs[0]?.messages[0]?.event).toBe(CLIENT_EVENTS.elementDelete);
   });
 
@@ -126,7 +143,7 @@ describe('PendingSync.reconcile', () => {
     const pending = new PendingSync();
     pending.addStroke(stroke('huge', LIMITS.maxPointsPerStroke + 10), false);
     const result = pending.reconcile([]);
-    expect(result.elements[0]?.points).toHaveLength(LIMITS.maxPointsPerStroke);
+    expect(pointsOf(result.elements[0])).toHaveLength(LIMITS.maxPointsPerStroke);
   });
 
   it('sends offline erases for strokes the server still has and hides them meanwhile', () => {
@@ -177,9 +194,9 @@ describe('PendingSync bookkeeping', () => {
     const pending = new PendingSync();
     const offline = pending.addStroke(stroke('offline'), false);
     pending.addStroke(stroke('cut-off'), true);
-    expect(pending.removeStroke('offline')).toEqual({ onServer: false });
-    expect(pending.removeStroke('cut-off')).toEqual({ onServer: true });
-    expect(pending.removeStroke('never-pending')).toBeUndefined();
+    expect(pending.removeElement('offline')).toEqual({ onServer: false });
+    expect(pending.removeElement('cut-off')).toEqual({ onServer: true });
+    expect(pending.removeElement('never-pending')).toBeUndefined();
     expect(pending.isActive(offline)).toBe(false);
     expect(pending.size).toBe(0);
   });
@@ -189,6 +206,80 @@ describe('PendingSync bookkeeping', () => {
     pending.addStroke(stroke('a'), false);
     pending.queueDelete('b');
     pending.clear();
+    expect(pending.size).toBe(0);
+  });
+});
+
+describe('shapes', () => {
+  it('shapeJob is a single element:add without the author or timestamp', () => {
+    const job = shapeJob(shape('r1', 'ellipse'));
+    expect(job.kind).toBe('shape');
+    expect(job.messages).toEqual([
+      {
+        event: CLIENT_EVENTS.elementAdd,
+        payload: {
+          id: 'r1',
+          type: 'ellipse',
+          color: '#112233',
+          width: 2,
+          fill: '#ffeecc',
+          start: { x: 0, y: 0 },
+          end: { x: 10, y: 5 },
+        },
+      },
+    ]);
+  });
+
+  it('shapeJob for a line carries no fill', () => {
+    const [message] = shapeJob(shape('l1', 'line')).messages;
+    expect(message?.payload).not.toHaveProperty('fill');
+  });
+
+  it('replays a shape the server does not have, on top of the server board', () => {
+    const pending = new PendingSync();
+    pending.addShape(shape('mine'));
+    const result = pending.reconcile([stroke('other')]);
+    expect(result.elements.map((e) => e.id)).toEqual(['other', 'mine']);
+    expect(result.jobs.map((j) => j.kind)).toEqual(['shape']);
+  });
+
+  it('does not replay a shape the server already has', () => {
+    const pending = new PendingSync();
+    pending.addShape(shape('mine'));
+    const result = pending.reconcile([shape('mine')]);
+    expect(result.jobs).toEqual([]);
+    expect(result.elements.map((e) => e.id)).toEqual(['mine']);
+    expect(pending.size).toBe(0);
+  });
+
+  it('keeps drawing order between offline strokes and shapes', () => {
+    const pending = new PendingSync();
+    pending.addStroke(stroke('s1'), false);
+    pending.addShape(shape('r1'));
+    pending.addStroke(stroke('s2'), false);
+    expect(pending.reconcile([]).elements.map((e) => e.id)).toEqual(['s1', 'r1', 's2']);
+  });
+
+  it('gives up on a shape when the board is full', () => {
+    const pending = new PendingSync();
+    pending.addShape(shape('late'));
+    const full = Array.from({ length: LIMITS.maxElementsPerBoard }, (_, i) => stroke(`s${i}`, 1));
+    const result = pending.reconcile(full);
+    expect(result.dropped).toBe(1);
+    expect(result.jobs).toEqual([]);
+  });
+
+  it('erasing a pending shape deactivates its job; the server never heard of it', () => {
+    const pending = new PendingSync();
+    const job = pending.addShape(shape('r1'));
+    expect(pending.removeElement('r1')).toEqual({ onServer: false });
+    expect(pending.isActive(job)).toBe(false);
+  });
+
+  it('resolving a shape job clears it', () => {
+    const pending = new PendingSync();
+    const job = pending.addShape(shape('r1'));
+    pending.resolve(job);
     expect(pending.size).toBe(0);
   });
 });

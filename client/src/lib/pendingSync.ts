@@ -1,6 +1,9 @@
 import { CLIENT_EVENTS, LIMITS } from '@whiteboard/shared';
 import type {
+  BoardElement,
+  ElementAddPayload,
   ElementDeletePayload,
+  Shape,
   Stroke,
   StrokeEndPayload,
   StrokePointsPayload,
@@ -13,27 +16,29 @@ import type {
  * paces and sends what this produces, and the replay uses only the existing event contract.
  *
  * Two kinds of work are pending:
- * - strokes the server has not fully received (drawn offline, or cut off by a disconnect), and
- * - erases of strokes the server may still hold.
+ * - elements the server has not fully received (strokes and shapes drawn offline, or a stroke cut
+ *   off by a disconnect), and
+ * - erases of elements the server may still hold.
  * Clearing the board is never queued: replaying it later could wipe other people's new work.
  */
 
 /** One socket emit, as data so it can be paced by the hook and inspected by tests. */
 export type Outgoing =
+  | { event: typeof CLIENT_EVENTS.elementAdd; payload: ElementAddPayload }
   | { event: typeof CLIENT_EVENTS.elementDelete; payload: ElementDeletePayload }
   | { event: typeof CLIENT_EVENTS.strokeStart; payload: StrokeStartPayload }
   | { event: typeof CLIENT_EVENTS.strokePoints; payload: StrokePointsPayload }
   | { event: typeof CLIENT_EVENTS.strokeEnd; payload: StrokeEndPayload };
 
 /** The messages that bring one pending item up to date on the server, in order. */
-export type Job = { kind: 'stroke' | 'delete'; id: string; messages: Outgoing[] };
+export type Job = { kind: 'stroke' | 'shape' | 'delete'; id: string; messages: Outgoing[] };
 
 export type Reconciled = {
   /** What the board should show: the server's elements plus the pending work on top. */
-  elements: Stroke[];
+  elements: BoardElement[];
   /** What to send so the server catches up with `elements`. */
   jobs: Job[];
-  /** Pending strokes given up on because the board is full. */
+  /** Pending strokes and shapes given up on because the board is full. */
   dropped: number;
 };
 
@@ -67,16 +72,27 @@ export function strokeJob(stroke: Stroke, replaceServerCopy: boolean): Job {
   return { kind: 'stroke', id, messages };
 }
 
-type Entry = { stroke: Stroke; onServer: boolean };
+/** A shape goes out as one message, so unlike a stroke it is never left half-sent. */
+export function shapeJob(shape: Shape): Job {
+  const { id, color, width, start, end } = shape;
+  const base = { id, color, width, start, end };
+  const payload: ElementAddPayload =
+    shape.type === 'rect' || shape.type === 'ellipse'
+      ? { ...base, type: shape.type, fill: shape.fill }
+      : { ...base, type: shape.type };
+  return { kind: 'shape', id, messages: [{ event: CLIENT_EVENTS.elementAdd, payload }] };
+}
+
+type Entry = { element: BoardElement; onServer: boolean };
 
 export class PendingSync {
   /** Insertion order is drawing order. */
-  private readonly strokes = new Map<string, Entry>();
+  private readonly elements = new Map<string, Entry>();
   private readonly deletes = new Set<string>();
 
   /** How many changes the server has not confirmed yet. */
   get size(): number {
-    return this.strokes.size + this.deletes.size;
+    return this.elements.size + this.deletes.size;
   }
 
   /**
@@ -85,14 +101,20 @@ export class PendingSync {
    * Returns the job to send right away if the socket is currently joined.
    */
   addStroke(stroke: Stroke, onServer: boolean): Job {
-    this.strokes.set(stroke.id, { stroke, onServer });
+    this.elements.set(stroke.id, { element: stroke, onServer });
     return strokeJob(limitStroke(stroke), onServer);
   }
 
-  /** The user erased `id`. Returns the pending entry, if the stroke was one. */
-  removeStroke(id: string): { onServer: boolean } | undefined {
-    const entry = this.strokes.get(id);
-    this.strokes.delete(id);
+  /** Remembers a finished shape the server does not have. Returns the job to send if joined. */
+  addShape(shape: Shape): Job {
+    this.elements.set(shape.id, { element: shape, onServer: false });
+    return shapeJob(shape);
+  }
+
+  /** The user erased `id`. Returns the pending entry, if the element was one. */
+  removeElement(id: string): { onServer: boolean } | undefined {
+    const entry = this.elements.get(id);
+    this.elements.delete(id);
     return entry && { onServer: entry.onServer };
   }
 
@@ -103,26 +125,26 @@ export class PendingSync {
 
   /** Whether a job still has to be sent (it may have been erased or cleared meanwhile). */
   isActive(job: Job): boolean {
-    return job.kind === 'stroke' ? this.strokes.has(job.id) : this.deletes.has(job.id);
+    return job.kind === 'delete' ? this.deletes.has(job.id) : this.elements.has(job.id);
   }
 
   /** The job's last message went out: the item is no longer pending. */
   resolve(job: Job): void {
-    if (job.kind === 'stroke') this.strokes.delete(job.id);
-    else this.deletes.delete(job.id);
+    if (job.kind === 'delete') this.deletes.delete(job.id);
+    else this.elements.delete(job.id);
   }
 
   clear(): void {
-    this.strokes.clear();
+    this.elements.clear();
     this.deletes.clear();
   }
 
   /**
    * Merges pending work with the server's authoritative elements (a `room:state`). Nothing is
-   * duplicated, because ids are stable: a stroke the server already has in full counts as
-   * synced, a truncated copy is replaced, and anything missing is replayed on top.
+   * duplicated, because ids are stable: an element the server already has in full counts as
+   * synced, a truncated stroke copy is replaced, and anything missing is replayed on top.
    */
-  reconcile(serverElements: Stroke[]): Reconciled {
+  reconcile(serverElements: BoardElement[]): Reconciled {
     const serverById = new Map(serverElements.map((element) => [element.id, element]));
     const jobs: Job[] = [];
 
@@ -141,26 +163,36 @@ export class PendingSync {
     }
 
     let count = serverElements.length - this.deletes.size;
-    const replayed: Stroke[] = [];
+    const replayed: BoardElement[] = [];
     const replaced = new Set<string>();
     let dropped = 0;
 
-    for (const [id, { stroke }] of [...this.strokes]) {
+    for (const [id, { element }] of [...this.elements]) {
       const copy = serverById.get(id);
-      if (copy && copy.points.length >= stroke.points.length) {
-        this.strokes.delete(id); // the server already has all of it
+      // Only a stroke can be partial on the server; anything else it holds is whole.
+      const complete =
+        copy !== undefined &&
+        (element.type !== 'stroke' ||
+          (copy.type === 'stroke' && copy.points.length >= element.points.length));
+      if (complete) {
+        this.elements.delete(id); // the server already has all of it
         continue;
       }
       if (!copy && count >= LIMITS.maxElementsPerBoard) {
-        this.strokes.delete(id);
+        this.elements.delete(id);
         dropped++;
         continue;
       }
-      const limited = limitStroke(stroke);
-      jobs.push(strokeJob(limited, copy !== undefined));
-      replayed.push(limited);
-      if (copy) replaced.add(id);
-      else count++;
+      if (element.type === 'stroke') {
+        const limited = limitStroke(element);
+        jobs.push(strokeJob(limited, copy !== undefined));
+        replayed.push(limited);
+        if (copy) replaced.add(id);
+      } else {
+        jobs.push(shapeJob(element));
+        replayed.push(element);
+      }
+      if (!copy) count++;
     }
 
     const elements = serverElements

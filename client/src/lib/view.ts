@@ -1,5 +1,5 @@
-import type { Point, Stroke } from '@whiteboard/shared';
-import { strokeBounds } from './geometry.ts';
+import type { BoardElement, Point } from '@whiteboard/shared';
+import { elementBounds } from './geometry.ts';
 import type { Rect } from './geometry.ts';
 
 /**
@@ -51,11 +51,11 @@ export function visibleRect(view: View, size: Size): Rect {
 }
 
 /** The box around everything drawn, or null for an empty board. */
-export function contentBounds(strokes: Stroke[]): Rect | null {
+export function contentBounds(elements: BoardElement[]): Rect | null {
   let bounds: Rect | null = null;
-  for (const stroke of strokes) {
-    if (stroke.points.length === 0) continue;
-    const b = strokeBounds(stroke);
+  for (const element of elements) {
+    if (element.type === 'stroke' && element.points.length === 0) continue;
+    const b = elementBounds(element);
     bounds = bounds
       ? {
           left: Math.min(bounds.left, b.left),

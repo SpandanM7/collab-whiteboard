@@ -1,9 +1,12 @@
 import { LIMITS } from '@whiteboard/shared';
 import type {
   Board,
+  BoardElement,
+  ElementAddPayload,
   ErrorCode,
   Participant,
   Point,
+  Shape,
   Stroke,
   StrokeStartPayload,
 } from '@whiteboard/shared';
@@ -44,7 +47,7 @@ export type RoomSnapshot = { board: Board; participants: Participant[] };
 type Room = {
   board: Board;
   /** Index into `board.elements` by id; holds the same objects. */
-  byId: Map<string, Stroke>;
+  byId: Map<string, BoardElement>;
   /** Total points over all strokes, kept in step so the board's size is checked in O(1). */
   pointCount: number;
   /** Strokes still being drawn: stroke id -> author client id. */
@@ -202,6 +205,30 @@ export class Rooms {
     return ok(stroke);
   }
 
+  /**
+   * Adds a finished shape in one step; shapes are not streamed. The author is the sender, and
+   * `createdAt` is the server's clock. Returns the stored shape, which is what gets relayed.
+   */
+  addElement(boardId: string, clientId: string, payload: ElementAddPayload): Result<Shape> {
+    const room = this.memberRoom(boardId, clientId);
+    if (!room.ok) return room;
+    const r = room.value;
+
+    if (r.byId.has(payload.id)) return fail('duplicate_id', 'An element with that id exists.');
+    if (r.board.elements.length >= this.limits.maxElementsPerBoard) {
+      return fail(
+        'board_full',
+        `A board holds at most ${this.limits.maxElementsPerBoard} elements.`,
+      );
+    }
+
+    const shape: Shape = { ...payload, authorId: clientId, createdAt: this.now() };
+    r.board.elements.push(shape);
+    r.byId.set(shape.id, shape);
+    this.touch(r);
+    return ok(shape);
+  }
+
   /** Appends points to a stroke the client is currently drawing. */
   appendPoints(boardId: string, clientId: string, id: string, points: Point[]): Result<Stroke> {
     const stroke = this.activeStroke(boardId, clientId, id);
@@ -242,7 +269,7 @@ export class Rooms {
     const removed = r.byId.get(id);
     if (!removed) return ok(false);
     r.byId.delete(id);
-    r.pointCount -= removed.points.length;
+    if (removed.type === 'stroke') r.pointCount -= removed.points.length;
     r.board.elements = r.board.elements.filter((e) => e.id !== id);
     r.active.delete(id);
     this.touch(r);
@@ -283,7 +310,7 @@ export class Rooms {
     const room = this.memberRoom(boardId, clientId);
     if (!room.ok) return room;
     const stroke = room.value.byId.get(id);
-    if (!stroke || room.value.active.get(id) !== clientId) {
+    if (stroke?.type !== 'stroke' || room.value.active.get(id) !== clientId) {
       return fail('unknown_stroke', 'No such stroke in progress.');
     }
     return ok({ room: room.value, stroke });

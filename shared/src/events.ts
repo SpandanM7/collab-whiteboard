@@ -4,8 +4,13 @@ import {
   boardSchema,
   colorSchema,
   idSchema,
+  arrowSchema,
+  ellipseSchema,
+  lineSchema,
   participantSchema,
   pointSchema,
+  rectSchema,
+  shapeSchema,
 } from './board.ts';
 import { LIMITS } from './limits.ts';
 
@@ -19,6 +24,7 @@ export const CLIENT_EVENTS = {
   strokeStart: 'stroke:start',
   strokePoints: 'stroke:points',
   strokeEnd: 'stroke:end',
+  elementAdd: 'element:add',
   elementDelete: 'element:delete',
   boardClear: 'board:clear',
   cursorMove: 'cursor:move',
@@ -29,6 +35,7 @@ export const SERVER_EVENTS = {
   strokeStart: 'stroke:start',
   strokePoints: 'stroke:points',
   strokeEnd: 'stroke:end',
+  elementAdded: 'element:added',
   elementDeleted: 'element:deleted',
   boardCleared: 'board:cleared',
   participantJoined: 'participant:joined',
@@ -59,6 +66,18 @@ export const strokePointsPayload = z.object({
 
 export const strokeEndPayload = z.object({ id: idSchema });
 
+/**
+ * A finished shape, sent in one message (shapes are only shown to others on release). The server
+ * sets `authorId` and `createdAt`, so the client does not send them.
+ */
+const shapeOmit = { authorId: true, createdAt: true } as const;
+export const elementAddPayload = z.discriminatedUnion('type', [
+  rectSchema.omit(shapeOmit),
+  ellipseSchema.omit(shapeOmit),
+  lineSchema.omit(shapeOmit),
+  arrowSchema.omit(shapeOmit),
+]);
+
 export const elementDeletePayload = z.object({ id: idSchema });
 
 export const boardClearPayload = z.object({});
@@ -76,6 +95,9 @@ export const roomStatePayload = z.object({
 export const strokeStartRelayPayload = strokeStartPayload.extend({ authorId: idSchema });
 export const strokePointsRelayPayload = strokePointsPayload.extend({ authorId: idSchema });
 export const strokeEndRelayPayload = strokeEndPayload.extend({ authorId: idSchema });
+
+/** The shape as stored on the board, including the server-assigned author. */
+export const elementAddedPayload = shapeSchema;
 
 export const elementDeletedPayload = z.object({ id: idSchema });
 
@@ -111,6 +133,7 @@ export type RoomJoinPayload = z.infer<typeof roomJoinPayload>;
 export type StrokeStartPayload = z.infer<typeof strokeStartPayload>;
 export type StrokePointsPayload = z.infer<typeof strokePointsPayload>;
 export type StrokeEndPayload = z.infer<typeof strokeEndPayload>;
+export type ElementAddPayload = z.infer<typeof elementAddPayload>;
 export type ElementDeletePayload = z.infer<typeof elementDeletePayload>;
 export type BoardClearPayload = z.infer<typeof boardClearPayload>;
 export type CursorMovePayload = z.infer<typeof cursorMovePayload>;
@@ -119,6 +142,7 @@ export type RoomStatePayload = z.infer<typeof roomStatePayload>;
 export type StrokeStartRelayPayload = z.infer<typeof strokeStartRelayPayload>;
 export type StrokePointsRelayPayload = z.infer<typeof strokePointsRelayPayload>;
 export type StrokeEndRelayPayload = z.infer<typeof strokeEndRelayPayload>;
+export type ElementAddedPayload = z.infer<typeof elementAddedPayload>;
 export type ElementDeletedPayload = z.infer<typeof elementDeletedPayload>;
 export type BoardClearedPayload = z.infer<typeof boardClearedPayload>;
 export type ParticipantJoinedPayload = z.infer<typeof participantJoinedPayload>;
@@ -134,6 +158,7 @@ export interface ClientToServerEvents {
   [CLIENT_EVENTS.strokeStart]: (payload: StrokeStartPayload) => void;
   [CLIENT_EVENTS.strokePoints]: (payload: StrokePointsPayload) => void;
   [CLIENT_EVENTS.strokeEnd]: (payload: StrokeEndPayload) => void;
+  [CLIENT_EVENTS.elementAdd]: (payload: ElementAddPayload) => void;
   [CLIENT_EVENTS.elementDelete]: (payload: ElementDeletePayload) => void;
   [CLIENT_EVENTS.boardClear]: (payload: BoardClearPayload) => void;
   [CLIENT_EVENTS.cursorMove]: (payload: CursorMovePayload) => void;
@@ -144,6 +169,7 @@ export interface ServerToClientEvents {
   [SERVER_EVENTS.strokeStart]: (payload: StrokeStartRelayPayload) => void;
   [SERVER_EVENTS.strokePoints]: (payload: StrokePointsRelayPayload) => void;
   [SERVER_EVENTS.strokeEnd]: (payload: StrokeEndRelayPayload) => void;
+  [SERVER_EVENTS.elementAdded]: (payload: ElementAddedPayload) => void;
   [SERVER_EVENTS.elementDeleted]: (payload: ElementDeletedPayload) => void;
   [SERVER_EVENTS.boardCleared]: (payload: BoardClearedPayload) => void;
   [SERVER_EVENTS.participantJoined]: (payload: ParticipantJoinedPayload) => void;

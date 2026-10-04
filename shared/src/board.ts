@@ -30,8 +30,51 @@ export const strokeSchema = z.object({
   createdAt: z.number(),
 });
 
-/** v1.1 adds more element types; this becomes a discriminated union. */
-export const boardElementSchema = strokeSchema;
+const shapeFields = {
+  id: idSchema,
+  authorId: idSchema,
+  color: colorSchema,
+  /** Outline width in board units. */
+  width: z.number().min(1).max(LIMITS.maxStrokeWidth),
+  /**
+   * The two corners the user dragged between. For rect and ellipse they span the bounding box
+   * (in any order); for line and arrow they are the tail and the head.
+   */
+  start: pointSchema,
+  end: pointSchema,
+  createdAt: z.number(),
+};
+
+export const rectSchema = z.object({
+  ...shapeFields,
+  type: z.literal('rect'),
+  /** Fill color; absent means outline only. */
+  fill: colorSchema.optional(),
+});
+export const ellipseSchema = z.object({
+  ...shapeFields,
+  type: z.literal('ellipse'),
+  fill: colorSchema.optional(),
+});
+export const lineSchema = z.object({ ...shapeFields, type: z.literal('line') });
+export const arrowSchema = z.object({ ...shapeFields, type: z.literal('arrow') });
+
+export const SHAPE_TYPES = ['rect', 'ellipse', 'line', 'arrow'] as const;
+
+export const shapeSchema = z.discriminatedUnion('type', [
+  rectSchema,
+  ellipseSchema,
+  lineSchema,
+  arrowSchema,
+]);
+
+export const boardElementSchema = z.discriminatedUnion('type', [
+  strokeSchema,
+  rectSchema,
+  ellipseSchema,
+  lineSchema,
+  arrowSchema,
+]);
 
 export const boardSchema = z.object({
   id: boardIdSchema,
@@ -50,6 +93,8 @@ export const participantSchema = z.object({
 
 export type Point = z.infer<typeof pointSchema>;
 export type Stroke = z.infer<typeof strokeSchema>;
+export type Shape = z.infer<typeof shapeSchema>;
+export type ShapeType = Shape['type'];
 export type BoardElement = z.infer<typeof boardElementSchema>;
 export type Board = z.infer<typeof boardSchema>;
 export type Participant = z.infer<typeof participantSchema>;

@@ -1,12 +1,19 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
+import type { ShapeType } from '@whiteboard/shared';
+import { isShapeTool } from '../types.ts';
 import type { Tool } from '../types.ts';
 
 type Props = {
   tool: Tool;
   color: string;
   width: number;
+  /** Whether new rectangles and ellipses are filled, and with which color. */
+  fillOn: boolean;
+  fillColor: string;
   onToolChange: (tool: Tool) => void;
+  onFillOnChange: (on: boolean) => void;
+  onFillColorChange: (color: string) => void;
   onColorChange: (color: string) => void;
   onWidthChange: (width: number) => void;
   onClear: () => void;
@@ -37,11 +44,31 @@ function Icon({ children }: { children: ReactNode }) {
   );
 }
 
+const SHAPE_TOOLS: { tool: ShapeType; label: string; icon: ReactNode }[] = [
+  { tool: 'rect', label: 'Rectangle', icon: <rect x="4" y="5" width="16" height="14" rx="1" /> },
+  { tool: 'ellipse', label: 'Ellipse', icon: <ellipse cx="12" cy="12" rx="9" ry="7" /> },
+  { tool: 'line', label: 'Line', icon: <path d="M5 19 19 5" /> },
+  {
+    tool: 'arrow',
+    label: 'Arrow',
+    icon: (
+      <>
+        <path d="M5 19 19 5" />
+        <path d="M9 5h10v10" />
+      </>
+    ),
+  },
+];
+
 export function Toolbar({
   tool,
   color,
   width,
+  fillOn,
+  fillColor,
   onToolChange,
+  onFillOnChange,
+  onFillColorChange,
   onColorChange,
   onWidthChange,
   onClear,
@@ -49,6 +76,29 @@ export function Toolbar({
 }: Props) {
   // Compact layout only: the width slider lives in a popover above the bar.
   const [widthOpen, setWidthOpen] = useState(false);
+  // The four shapes and the fill option share one toolbar button, so the bar stays the same width.
+  const [shapesOpen, setShapesOpen] = useState(false);
+  const [lastShape, setLastShape] = useState<ShapeType>('rect');
+  const shapeActive = isShapeTool(tool);
+  if (isShapeTool(tool) && tool !== lastShape) setLastShape(tool);
+
+  // Anything outside the popover (the canvas, another tool) or Escape closes it.
+  useEffect(() => {
+    if (!shapesOpen) return;
+    const onPointerDown = (e: PointerEvent) => {
+      const target = e.target instanceof Element ? e.target : null;
+      if (!target?.closest('.shapes-popover, .shapes-toggle')) setShapesOpen(false);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setShapesOpen(false);
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [shapesOpen]);
 
   return (
     <div
@@ -95,6 +145,20 @@ export function Toolbar({
         </Icon>
         <span className="label">Hand</span>
       </button>
+      <button
+        type="button"
+        className={`shapes-toggle${shapeActive ? ' active' : ''}`}
+        aria-pressed={shapeActive}
+        aria-expanded={shapesOpen}
+        aria-haspopup="true"
+        onClick={() => {
+          if (!shapeActive) onToolChange(lastShape);
+          setShapesOpen(!shapeActive || !shapesOpen);
+        }}
+      >
+        <Icon>{SHAPE_TOOLS.find((shape) => shape.tool === lastShape)?.icon}</Icon>
+        <span className="label">Shapes</span>
+      </button>
       <label className="color">
         <input
           type="color"
@@ -138,6 +202,56 @@ export function Toolbar({
         </Icon>
         <span className="label">Clear</span>
       </button>
+      {shapesOpen && (
+        <div className="shapes-popover" role="group" aria-label="Shapes">
+          {SHAPE_TOOLS.map((shape) => (
+            <button
+              key={shape.tool}
+              type="button"
+              className={tool === shape.tool ? 'active' : ''}
+              aria-pressed={tool === shape.tool}
+              onClick={() => {
+                onToolChange(shape.tool);
+                setShapesOpen(false);
+              }}
+            >
+              <Icon>{shape.icon}</Icon>
+              <span className="label">{shape.label}</span>
+            </button>
+          ))}
+          <div className="fill-options">
+            <button
+              type="button"
+              className={fillOn ? 'active' : ''}
+              aria-pressed={fillOn}
+              aria-label="Fill rectangles and ellipses"
+              title="Fill rectangles and ellipses"
+              onClick={() => onFillOnChange(!fillOn)}
+            >
+              <Icon>
+                <rect
+                  x="4"
+                  y="4"
+                  width="16"
+                  height="16"
+                  rx="2"
+                  fill={fillOn ? fillColor : 'none'}
+                />
+              </Icon>
+              <span className="label">Fill</span>
+            </button>
+            <input
+              type="color"
+              value={fillColor}
+              aria-label="Fill color"
+              onChange={(e) => {
+                onFillColorChange(e.target.value);
+                onFillOnChange(true);
+              }}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

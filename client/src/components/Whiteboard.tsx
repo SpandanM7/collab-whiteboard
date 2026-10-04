@@ -1,30 +1,35 @@
 import { nanoid } from 'nanoid';
 import { useLayoutEffect, useRef } from 'react';
 import type { PointerEvent } from 'react';
-import type { Point, Stroke } from '@whiteboard/shared';
+import type { BoardElement, Point, Shape, Stroke } from '@whiteboard/shared';
 import { toBoard } from '../lib/coords.ts';
-import { drawStroke } from '../lib/drawing.ts';
-import { rectsIntersect, strokeBounds, strokeHit } from '../lib/geometry.ts';
+import { drawElement, drawShape, drawStroke } from '../lib/drawing.ts';
+import { elementBounds, elementHit, rectsIntersect } from '../lib/geometry.ts';
 import { clampScale, panBy, toBoardPoint, visibleRect, zoomAt } from '../lib/view.ts';
 import type { View } from '../lib/view.ts';
+import { isShapeTool } from '../types.ts';
 import type { Tool } from '../types.ts';
 
 /** In screen pixels, so the eraser feels the same at any zoom. */
 const ERASER_RADIUS = 6;
 const LOCAL_AUTHOR_ID = 'local';
+/** A shape dragged out smaller than this (in screen pixels) was a click, not a shape. */
+const MIN_SHAPE_SIZE = 4;
 /** Ctrl + wheel (and trackpad pinch): zoom factor is e^(-delta * speed), delta capped per event. */
 const WHEEL_ZOOM_SPEED = 0.01;
 const WHEEL_ZOOM_MAX_DELTA = 50;
 const WHEEL_LINE_PX = 16;
 
 type Props = {
-  /** Finished strokes, drawn from the cached layer. */
-  strokes: Stroke[];
+  /** Finished strokes and shapes, drawn from the cached layer. */
+  elements: BoardElement[];
   /** Strokes other people are still drawing; repainted every frame on top of the cache. */
   liveStrokes: Stroke[];
   tool: Tool;
   color: string;
   width: number;
+  /** Fill color for new rectangles and ellipses; null draws them as outlines. */
+  fill: string | null;
   /** Where this person is looking: pan and zoom. Local only, never synced. */
   view: View;
   /** The person moved or zoomed the view (drag, pinch, wheel). */
@@ -34,6 +39,8 @@ type Props = {
   onStrokeStart: (stroke: Stroke) => void;
   onStrokePoints: (id: string, points: Point[]) => void;
   onStrokeAdd: (stroke: Stroke) => void;
+  /** A shape was finished (pointer released). Shapes are shown to others only at this point. */
+  onShapeAdd: (shape: Shape) => void;
   onStrokeCancel: (id: string) => void;
   onStrokesErase: (ids: string[]) => void;
   /** The pointer moved over the board (hovering or drawing), in board space. */
@@ -55,13 +62,15 @@ function isTypingTarget(target: EventTarget | null): boolean {
 
 export function Whiteboard(props: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  // Committed strokes are cached here so a frame only has to blit + draw the active stroke.
+  // Committed elements are cached here so a frame only has to blit + draw the active stroke.
   const cacheRef = useRef<HTMLCanvasElement | null>(null);
   // The view the cache was drawn with; the cache is rebuilt when the view moves on.
   const cacheViewRef = useRef<View | null>(null);
   // The latest view, updated the moment a gesture changes it (props follow after a render).
   const viewRef = useRef(props.view);
   const activeRef = useRef<Stroke | null>(null);
+  // The shape being dragged out. Local only until release, so it needs no network handling.
+  const shapeRef = useRef<Shape | null>(null);
   const pointerIdRef = useRef<number | null>(null);
   const panRef = useRef<Pan | null>(null);
   const pinchRef = useRef<Pinch | null>(null);
@@ -96,6 +105,7 @@ export function Whiteboard(props: Props) {
     applyView(ctx, view);
     for (const stroke of propsRef.current.liveStrokes) drawStroke(ctx, stroke);
     if (activeRef.current) drawStroke(ctx, activeRef.current);
+    if (shapeRef.current) drawShape(ctx, shapeRef.current);
   };
 
   const schedulePaint = () => {
@@ -116,10 +126,10 @@ export function Whiteboard(props: Props) {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, cache.width, cache.height);
     applyView(ctx, view);
-    // Strokes off screen cost nothing, so a big board stays smooth while panning.
+    // Elements off screen cost nothing, so a big board stays smooth while panning.
     const visible = visibleRect(view, { width: cache.width / dpr, height: cache.height / dpr });
-    for (const stroke of propsRef.current.strokes) {
-      if (rectsIntersect(strokeBounds(stroke), visible)) drawStroke(ctx, stroke);
+    for (const element of propsRef.current.elements) {
+      if (rectsIntersect(elementBounds(element), visible)) drawElement(ctx, element);
     }
   };
 
@@ -228,12 +238,12 @@ export function Whiteboard(props: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Redraw from stroke data. Layout effect so the frame never shows a stroke missing.
+  // Redraw from element data. Layout effect so the frame never shows an element missing.
   useLayoutEffect(() => {
     rebuildCache();
     paint();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.strokes]);
+  }, [props.elements]);
 
   // The view was changed from outside (zoom buttons, fit, jump to a person).
   useLayoutEffect(() => {
@@ -258,8 +268,9 @@ export function Whiteboard(props: Props) {
     pinchRef.current = null;
     touchesRef.current.clear();
     ignoredRef.current.clear();
-    if (activeRef.current) {
+    if (activeRef.current || shapeRef.current) {
       activeRef.current = null;
+      shapeRef.current = null;
       paint();
     }
     // paint only touches refs, so it is safe to omit.
@@ -267,9 +278,11 @@ export function Whiteboard(props: Props) {
   }, [props.disabled]);
 
   const erase = (points: Point[]) => {
-    const { strokes, onStrokesErase } = propsRef.current;
+    const { elements, onStrokesErase } = propsRef.current;
     const radius = ERASER_RADIUS / viewRef.current.scale;
-    const ids = strokes.filter((s) => points.some((p) => strokeHit(s, p, radius))).map((s) => s.id);
+    const ids = elements
+      .filter((e) => points.some((p) => elementHit(e, p, radius)))
+      .map((e) => e.id);
     if (ids.length > 0) onStrokesErase(ids);
   };
 
@@ -279,6 +292,7 @@ export function Whiteboard(props: Props) {
     const [a, b] = ids.map((id) => touchesRef.current.get(id)!);
     const stroke = activeRef.current;
     activeRef.current = null;
+    shapeRef.current = null;
     if (stroke) propsRef.current.onStrokeCancel(stroke.id);
     pointerIdRef.current = null;
     panRef.current = null;
@@ -292,7 +306,7 @@ export function Whiteboard(props: Props) {
       startDistance: Math.max(1, Math.hypot(a.x - b.x, a.y - b.y)),
       startScale: viewRef.current.scale,
     };
-    paint(); // the cancelled stroke leaves the screen
+    paint(); // the cancelled stroke or shape leaves the screen
   };
 
   const updatePinch = (pinch: Pinch, rect: DOMRect) => {
@@ -307,7 +321,7 @@ export function Whiteboard(props: Props) {
   };
 
   const handlePointerDown = (e: PointerEvent<HTMLCanvasElement>) => {
-    const { disabled, tool, color, width } = propsRef.current;
+    const { disabled, tool, color, width, fill } = propsRef.current;
     if (disabled) return;
     const canvas = e.currentTarget;
 
@@ -348,6 +362,23 @@ export function Whiteboard(props: Props) {
     const point = toBoard(e, canvas.getBoundingClientRect(), viewRef.current);
     if (tool === 'eraser') {
       erase([point]);
+      return;
+    }
+    if (isShapeTool(tool)) {
+      const base = {
+        id: nanoid(),
+        authorId: LOCAL_AUTHOR_ID,
+        color,
+        width,
+        start: point,
+        end: point,
+        createdAt: Date.now(),
+      };
+      shapeRef.current =
+        tool === 'rect' || tool === 'ellipse'
+          ? { ...base, type: tool, ...(fill ? { fill } : {}) }
+          : { ...base, type: tool };
+      schedulePaint();
       return;
     }
     activeRef.current = {
@@ -391,6 +422,9 @@ export function Whiteboard(props: Props) {
 
     if (propsRef.current.tool === 'eraser') {
       erase(points);
+    } else if (shapeRef.current) {
+      shapeRef.current.end = points[points.length - 1];
+      schedulePaint();
     } else if (activeRef.current) {
       activeRef.current.points.push(...points);
       propsRef.current.onStrokePoints(activeRef.current.id, points);
@@ -423,7 +457,19 @@ export function Whiteboard(props: Props) {
     if (id !== pointerIdRef.current) return;
     pointerIdRef.current = null;
     const stroke = activeRef.current;
+    const shape = shapeRef.current;
     activeRef.current = null;
+    shapeRef.current = null;
+    if (shape) {
+      const { start, end } = shape;
+      const size = Math.hypot(end.x - start.x, end.y - start.y) * viewRef.current.scale;
+      if (commit && size >= MIN_SHAPE_SIZE) {
+        propsRef.current.onShapeAdd(shape); // the new element repaints the board
+      } else {
+        paint(); // too small or cancelled: drop the preview
+      }
+      return;
+    }
     if (stroke && commit) {
       propsRef.current.onStrokeAdd(stroke);
     } else {

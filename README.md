@@ -11,6 +11,7 @@ cursors and presence. No account needed.
 ## Features
 
 - Freehand pen and whole-stroke eraser, color picker, adjustable stroke width
+- Shapes: rectangle, ellipse, line and arrow, with outline color and width and an optional fill. They appear for others when you release the mouse
 - Real-time sync: remote strokes appear while they are being drawn
 - Live cursors with name labels, plus a participant list (names are editable)
 - Clear board (with confirmation), synced to everyone
