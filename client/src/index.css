@@ -66,6 +66,8 @@ body,
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
   user-select: none;
   -webkit-touch-callout: none;
+  /* Its popovers open over the banners and the zoom controls. */
+  z-index: 9;
 }
 
 .toolbar button {
@@ -104,14 +106,14 @@ body,
   font-variant-numeric: tabular-nums;
 }
 
-/* The shape tools and the fill option, opened from the Shapes button. */
+/* The shape tools, opened from the Shapes button: a grid of icon tiles. */
 .shapes-popover {
   position: absolute;
   top: calc(100% + 8px);
   left: 50%;
-  display: flex;
-  align-items: center;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
   padding: 8px;
   background: #fff;
   border: 1px solid #e5e4e7;
@@ -120,12 +122,24 @@ body,
   transform: translateX(-50%);
 }
 
-.shapes-popover .fill-options {
+.toolbar .shapes-popover button {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 8px;
-  padding-left: 8px;
-  border-left: 1px solid #e5e4e7;
+  gap: 2px;
+  min-width: 72px;
+  padding: 6px 4px;
+  font-size: 11px;
+  background: transparent;
+}
+
+.toolbar .shapes-popover button:hover:not(.active) {
+  background: #f4f3ec;
+}
+
+.toolbar .shapes-popover button.active {
+  color: #fff;
+  background: #1a1a1a;
 }
 
 .connection {
@@ -580,6 +594,8 @@ input.participant-name:focus {
 /* Desktop: the compact-only controls stay out of the way. */
 .toolbar .icon,
 .toolbar .width-toggle,
+.toolbar .style-toggle,
+.style-panel-close,
 .toolbar .color .label,
 .participants-chip {
   display: none;
@@ -587,6 +603,10 @@ input.participant-name:focus {
 
 .participants-wrap {
   align-self: stretch;
+}
+
+.toolbar .shapes-popover .icon {
+  display: block;
 }
 
 /* Touch screens at any size: finger-sized targets, and 16px inputs so iOS does not zoom on focus. */
@@ -719,11 +739,13 @@ input.participant-name:focus {
     transform: none;
   }
 
-  .shapes-popover .fill-options {
-    flex: 1.4;
-    justify-content: space-around;
-    gap: 2px;
-    padding-left: 2px;
+  .shapes-popover {
+    grid-template-columns: repeat(auto-fit, minmax(52px, 1fr));
+  }
+
+  .toolbar .shapes-popover button {
+    min-width: 0;
+    max-width: none;
   }
 
   .toolbar .width input {
@@ -822,7 +844,8 @@ input.participant-name:focus {
 
 /* The width toggle only exists in the compact layout. */
 @media (max-width: 1099px) {
-  .toolbar .width-toggle {
+  .toolbar .width-toggle,
+  .toolbar .style-toggle {
     display: flex;
   }
 }
@@ -963,5 +986,185 @@ input.participant-name:focus {
   .zoom .zoom-level {
     min-width: 44px;
     font-size: 11px;
+  }
+}
+
+.zoom button.active {
+  color: #fff;
+  background: #1a1a1a;
+}
+
+/* Options for new shapes: a card on the left on desktop, a sheet on small screens. */
+.style-panel {
+  position: fixed;
+  top: calc(var(--safe-top) + 72px);
+  left: calc(var(--safe-left) + 16px);
+  /* Above the zoom controls, which share the right edge with the sheet on small screens. */
+  z-index: 8;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 240px;
+  max-height: calc(100dvh - 160px);
+  padding: 12px;
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid #e5e4e7;
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  user-select: none;
+}
+
+.style-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-weight: 600;
+}
+
+.style-panel-close {
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.style-panel section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.style-panel h3 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 500;
+  color: #666;
+}
+
+.segmented {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  background: #f4f3ec;
+  border-radius: 8px;
+}
+
+.segmented button {
+  display: grid;
+  flex: 1;
+  place-items: center;
+  height: 32px;
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.segmented button.active {
+  color: #fff;
+  background: #1a1a1a;
+}
+
+.swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.swatch,
+.swatch-custom {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.swatch.active {
+  outline: 2px solid #1c7ed6;
+  outline-offset: 1px;
+}
+
+/* No fill: a white tile with a red diagonal. */
+.swatch.none {
+  background: linear-gradient(
+    to top right,
+    #fff calc(50% - 1px),
+    #e03131 calc(50% - 1px) calc(50% + 1px),
+    #fff calc(50% + 1px)
+  );
+}
+
+.swatch-custom {
+  background: none;
+}
+
+.style-panel .opacity {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.style-panel .opacity input {
+  flex: 1;
+  min-width: 0;
+  accent-color: #1a1a1a;
+}
+
+.style-panel .opacity span {
+  min-width: 4ch;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+@media (pointer: coarse) {
+  .segmented button {
+    height: 40px;
+  }
+
+  .swatch,
+  .swatch-custom {
+    width: 32px;
+    height: 32px;
+  }
+}
+
+@media (max-width: 1099px) {
+  /* A sheet above the bottom toolbar, shown from the Style button. */
+  .style-panel {
+    top: auto;
+    right: calc(var(--safe-right) + 12px);
+    bottom: calc(var(--toolbar-h) + var(--safe-bottom) + 12px);
+    left: calc(var(--safe-left) + 12px);
+    display: none;
+    flex-flow: row wrap;
+    width: auto;
+    max-height: 45dvh;
+  }
+
+  .style-panel.open {
+    display: flex;
+  }
+
+  /* Wide enough for a row of finger-sized swatches plus the custom color. */
+  .style-panel section {
+    flex: 1 1 264px;
+  }
+
+  .style-panel-header {
+    flex-basis: 100%;
+  }
+
+  .style-panel-close {
+    display: grid;
   }
 }
