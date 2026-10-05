@@ -1,6 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import type { Shape } from '@whiteboard/shared';
-import { arrowHead, elementBounds, elementHit, shapeBounds, shapeHit } from './geometry.ts';
+import type { LineShape, Shape } from '@whiteboard/shared';
+import {
+  arrowHead,
+  cylinderCap,
+  dotRadius,
+  elementBounds,
+  elementHit,
+  headLength,
+  lineHeadOutlines,
+  lineHeads,
+  linePath,
+  polygonPoints,
+  shapeBounds,
+  shapeHit,
+} from './geometry.ts';
 
 const base = {
   id: 's',
@@ -118,5 +131,98 @@ describe('element dispatch', () => {
     expect(elementHit(stroke, { x: 5, y: 0 }, 0)).toBe(true);
     expect(elementBounds(rect())).toEqual(shapeBounds(rect()));
     expect(elementHit(rect(), { x: 50, y: 0 }, 0)).toBe(true);
+  });
+});
+
+describe('new shapes', () => {
+  const box = { start: { x: 0, y: 0 }, end: { x: 100, y: 100 } };
+  const closed = (type: Shape['type'], extra: Partial<Shape> = {}) =>
+    ({ ...base, ...box, type, ...extra }) as Shape;
+
+  it('stretches each polygon to fill its box', () => {
+    for (const type of ['rect', 'diamond', 'triangle', 'hexagon', 'star'] as const) {
+      const points = polygonPoints(type, { left: 0, top: 0, right: 100, bottom: 100 })!;
+      expect(Math.min(...points.map((p) => p.x))).toBeCloseTo(type === 'star' ? 2.45 : 0, 1);
+      expect(Math.min(...points.map((p) => p.y))).toBeCloseTo(0);
+      expect(Math.max(...points.map((p) => p.y))).toBeCloseTo(100);
+    }
+    expect(polygonPoints('ellipse', { left: 0, top: 0, right: 1, bottom: 1 })).toBeNull();
+  });
+
+  it('hits a diamond on its edges, not in its empty corners', () => {
+    expect(shapeHit(closed('diamond'), { x: 25, y: 25 }, 0)).toBe(true); // on the top-left edge
+    expect(shapeHit(closed('diamond'), { x: 5, y: 5 }, 0)).toBe(false); // box corner
+    expect(shapeHit(closed('diamond'), { x: 50, y: 50 }, 0)).toBe(false); // hollow middle
+    expect(shapeHit(closed('diamond', { fill: '#ff0000' }), { x: 50, y: 50 }, 0)).toBe(true);
+  });
+
+  it('hits a filled triangle inside but not beside its point', () => {
+    const t = closed('triangle', { fill: '#ff0000' });
+    expect(shapeHit(t, { x: 50, y: 80 }, 0)).toBe(true);
+    expect(shapeHit(t, { x: 10, y: 10 }, 0)).toBe(false);
+  });
+
+  it('hits a cylinder on the front edge of its lid', () => {
+    const c = closed('cylinder');
+    const cap = cylinderCap({ left: 0, top: 0, right: 100, bottom: 100 });
+    expect(shapeHit(c, { x: 50, y: 2 * cap }, 0)).toBe(true); // lowest point of the lid
+    expect(shapeHit(c, { x: 50, y: 70 }, 0)).toBe(false); // hollow body
+  });
+
+  it('keeps every shape inside its padded box', () => {
+    for (const type of ['ellipse', 'diamond', 'star', 'cylinder'] as const) {
+      expect(shapeBounds(closed(type))).toEqual({ left: -1, top: -1, right: 101, bottom: 101 });
+    }
+  });
+});
+
+describe('lines and arrows', () => {
+  it('routes an elbow along the longer axis first', () => {
+    const wide = linePath({ start: { x: 0, y: 0 }, end: { x: 100, y: 40 }, route: 'elbow' });
+    expect(wide).toEqual([
+      { x: 0, y: 0 },
+      { x: 50, y: 0 },
+      { x: 50, y: 40 },
+      { x: 100, y: 40 },
+    ]);
+    const tall = linePath({ start: { x: 0, y: 0 }, end: { x: 30, y: 100 }, route: 'elbow' });
+    expect(tall[1]).toEqual({ x: 0, y: 50 });
+  });
+
+  it('keeps an elbow that is already straight as one segment', () => {
+    expect(linePath({ start: { x: 0, y: 0 }, end: { x: 0, y: 50 }, route: 'elbow' })).toHaveLength(
+      2,
+    );
+  });
+
+  it('gives an arrow an end head by default, and a line none', () => {
+    expect(lineHeads(arrow() as LineShape)).toEqual({ start: 'none', end: 'arrow' });
+    expect(lineHeads(line() as LineShape)).toEqual({ start: 'none', end: 'none' });
+  });
+
+  it('points an elbow arrow head along the last segment', () => {
+    const a = arrow({ start: { x: 0, y: 0 }, end: { x: 100, y: 40 }, route: 'elbow' }) as LineShape;
+    const [, head] = lineHeadOutlines(a);
+    // The last segment runs right, so both barbs sit left of the tip.
+    expect(head[0].x).toBeLessThan(100);
+    expect(head[2].x).toBeLessThan(100);
+    expect(head[1]).toEqual({ x: 100, y: 40 });
+  });
+
+  it('hits a head at the start of the line too', () => {
+    const a = arrow({
+      start: { x: 0, y: 0 },
+      end: { x: 100, y: 0 },
+      startHead: 'bar',
+    }) as LineShape;
+    expect(shapeHit(a, { x: 0, y: headLength(a.width) / 2 }, 0)).toBe(true);
+    expect(shapeHit({ ...a, startHead: 'none' }, { x: 0, y: headLength(a.width) / 2 }, 0)).toBe(
+      false,
+    );
+  });
+
+  it('includes a dot head in the bounds', () => {
+    const a = arrow({ start: { x: 0, y: 0 }, end: { x: 100, y: 0 }, endHead: 'dot' }) as LineShape;
+    expect(shapeBounds(a).right).toBeGreaterThan(100 + dotRadius(a.width) - 0.01);
   });
 });

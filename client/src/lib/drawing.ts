@@ -1,5 +1,23 @@
-import type { BoardElement, Shape, Stroke } from '@whiteboard/shared';
-import { arrowHead } from './geometry.ts';
+import { isClosedShape } from '@whiteboard/shared';
+import type {
+  Arrowhead,
+  BoardElement,
+  ClosedShape,
+  LineShape,
+  Point,
+  Shape,
+  Stroke,
+  StrokeStyle,
+} from '@whiteboard/shared';
+import {
+  cornerRadius,
+  cylinderCap,
+  lineHeadOutlines,
+  lineHeads,
+  linePath,
+  normalizedBox,
+  polygonPoints,
+} from './geometry.ts';
 
 /** Draws one stroke, smoothing the polyline with quadratic curves through segment midpoints. */
 export function drawStroke(ctx: CanvasRenderingContext2D, stroke: Stroke): void {
@@ -31,52 +49,167 @@ export function drawStroke(ctx: CanvasRenderingContext2D, stroke: Stroke): void 
   ctx.stroke();
 }
 
-/** Draws a rect, ellipse, line or arrow: fill first (if any), then the outline on top. */
-export function drawShape(ctx: CanvasRenderingContext2D, shape: Shape): void {
-  const { start, end, color, width } = shape;
-  ctx.strokeStyle = color;
-  ctx.lineWidth = width;
-  ctx.lineCap = 'round';
-  ctx.lineJoin = 'round';
-
-  ctx.beginPath();
-  switch (shape.type) {
-    case 'rect':
-      ctx.rect(
-        Math.min(start.x, end.x),
-        Math.min(start.y, end.y),
-        Math.abs(end.x - start.x),
-        Math.abs(end.y - start.y),
-      );
-      break;
-    case 'ellipse':
-      ctx.ellipse(
-        (start.x + end.x) / 2,
-        (start.y + end.y) / 2,
-        Math.abs(end.x - start.x) / 2,
-        Math.abs(end.y - start.y) / 2,
-        0,
-        0,
-        Math.PI * 2,
-      );
-      break;
-    case 'line':
-    case 'arrow':
-      ctx.moveTo(start.x, start.y);
-      ctx.lineTo(end.x, end.y);
-      if (shape.type === 'arrow') {
-        const [a, b] = arrowHead(start, end, width);
-        ctx.moveTo(a.x, a.y);
-        ctx.lineTo(end.x, end.y);
-        ctx.lineTo(b.x, b.y);
-      }
-      break;
+/** The dash pattern for an outline style; dots rely on round caps. */
+export function dashPattern(style: StrokeStyle | undefined, width: number): number[] {
+  switch (style) {
+    case 'dashed':
+      return [width * 3 + 6, width * 2 + 6];
+    case 'dotted':
+      return [0, width * 2 + 4];
+    default:
+      return [];
   }
-  if ((shape.type === 'rect' || shape.type === 'ellipse') && shape.fill) {
-    ctx.fillStyle = shape.fill;
+}
+
+/** Traces a polygon whose corners are cut back by `radius` and joined with a curve. */
+function traceRounded(ctx: CanvasRenderingContext2D, points: Point[], radius: number): void {
+  const n = points.length;
+  const toward = (from: Point, to: Point, distance: number): Point => {
+    const length = Math.hypot(to.x - from.x, to.y - from.y) || 1;
+    return {
+      x: from.x + ((to.x - from.x) * distance) / length,
+      y: from.y + ((to.y - from.y) * distance) / length,
+    };
+  };
+  const edge = (a: Point, b: Point) => Math.hypot(b.x - a.x, b.y - a.y);
+  for (let i = 0; i < n; i++) {
+    const prev = points[(i + n - 1) % n];
+    const corner = points[i];
+    const next = points[(i + 1) % n];
+    // A third of each edge at most, so short edges (a star's) keep their shape.
+    const cut = Math.min(radius, edge(prev, corner) / 3, edge(corner, next) / 3);
+    const enter = toward(corner, prev, cut);
+    const leave = toward(corner, next, cut);
+    if (i === 0) ctx.moveTo(enter.x, enter.y);
+    else ctx.lineTo(enter.x, enter.y);
+    ctx.quadraticCurveTo(corner.x, corner.y, leave.x, leave.y);
+  }
+  ctx.closePath();
+}
+
+/** Traces the outline a closed shape's fill covers. */
+function traceClosed(ctx: CanvasRenderingContext2D, shape: ClosedShape): void {
+  const box = normalizedBox(shape);
+  const polygon = polygonPoints(shape.type, box);
+  if (polygon) {
+    if (shape.rounded) {
+      traceRounded(ctx, polygon, cornerRadius(box));
+      return;
+    }
+    ctx.moveTo(polygon[0].x, polygon[0].y);
+    for (const p of polygon.slice(1)) ctx.lineTo(p.x, p.y);
+    ctx.closePath();
+    return;
+  }
+  const cx = (box.left + box.right) / 2;
+  const rx = (box.right - box.left) / 2;
+  if (shape.type === 'ellipse') {
+    const ry = (box.bottom - box.top) / 2;
+    ctx.ellipse(cx, box.top + ry, rx, ry, 0, 0, Math.PI * 2);
+    return;
+  }
+  // Cylinder: the back of the lid, down the right side, the front of the base, up the left.
+  const cap = cylinderCap(box);
+  ctx.ellipse(cx, box.top + cap, rx, cap, 0, Math.PI, Math.PI * 2);
+  ctx.ellipse(cx, box.bottom - cap, rx, cap, 0, 0, Math.PI);
+  ctx.closePath();
+}
+
+/** Fills the current path with diagonal lines (and the other diagonal too for `cross`). */
+function hatch(ctx: CanvasRenderingContext2D, shape: ClosedShape, color: string): void {
+  const box = normalizedBox(shape);
+  const gap = Math.max(8, shape.width * 3);
+  const size = box.right - box.left + (box.bottom - box.top);
+  ctx.save();
+  ctx.clip();
+  ctx.setLineDash([]);
+  ctx.strokeStyle = color;
+  ctx.lineWidth = Math.max(1, shape.width / 2);
+  ctx.beginPath();
+  for (let d = 0; d <= size; d += gap) {
+    ctx.moveTo(box.left + d, box.top);
+    ctx.lineTo(box.left + d - size, box.top + size);
+    if (shape.fillStyle === 'cross') {
+      ctx.moveTo(box.right - d, box.top);
+      ctx.lineTo(box.right - d + size, box.top + size);
+    }
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawClosed(ctx: CanvasRenderingContext2D, shape: ClosedShape): void {
+  ctx.beginPath();
+  traceClosed(ctx, shape);
+  if (shape.fill) {
+    if (shape.fillStyle === 'hatch' || shape.fillStyle === 'cross') {
+      hatch(ctx, shape, shape.fill);
+      // Hatching replaced the current path with its lines; the outline needs the shape again.
+      ctx.beginPath();
+      traceClosed(ctx, shape);
+    } else {
+      ctx.fillStyle = shape.fill;
+      ctx.fill();
+    }
+  }
+  ctx.stroke();
+  if (shape.type === 'cylinder') {
+    // The front edge of the lid, which the silhouette does not include.
+    const box = normalizedBox(shape);
+    const cap = cylinderCap(box);
+    ctx.beginPath();
+    ctx.ellipse(
+      (box.left + box.right) / 2,
+      box.top + cap,
+      (box.right - box.left) / 2,
+      cap,
+      0,
+      0,
+      Math.PI,
+    );
+    ctx.stroke();
+  }
+}
+
+function drawHead(ctx: CanvasRenderingContext2D, kind: Arrowhead, outline: Point[]): void {
+  if (outline.length === 0) return;
+  ctx.beginPath();
+  ctx.moveTo(outline[0].x, outline[0].y);
+  for (const p of outline.slice(1)) ctx.lineTo(p.x, p.y);
+  if (kind === 'triangle' || kind === 'dot') {
+    ctx.closePath();
     ctx.fill();
   }
   ctx.stroke();
+}
+
+function drawLine(ctx: CanvasRenderingContext2D, shape: LineShape): void {
+  const path = linePath(shape);
+  ctx.beginPath();
+  ctx.moveTo(path[0].x, path[0].y);
+  for (const p of path.slice(1)) ctx.lineTo(p.x, p.y);
+  ctx.stroke();
+  // Heads are always solid, even on a dashed line.
+  ctx.setLineDash([]);
+  ctx.fillStyle = shape.color;
+  const heads = lineHeads(shape);
+  const [tail, head] = lineHeadOutlines(shape);
+  drawHead(ctx, heads.start, tail);
+  drawHead(ctx, heads.end, head);
+}
+
+/** Draws any shape: fill first (if any), then the outline on top, then any arrow heads. */
+export function drawShape(ctx: CanvasRenderingContext2D, shape: Shape): void {
+  ctx.save();
+  ctx.globalAlpha = shape.opacity ?? 1;
+  ctx.strokeStyle = shape.color;
+  ctx.lineWidth = shape.width;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.setLineDash(dashPattern(shape.strokeStyle, shape.width));
+  if (isClosedShape(shape)) drawClosed(ctx, shape);
+  else drawLine(ctx, shape);
+  ctx.restore();
 }
 
 export function drawElement(ctx: CanvasRenderingContext2D, element: BoardElement): void {
