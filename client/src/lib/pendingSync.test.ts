@@ -235,6 +235,24 @@ describe('shapes', () => {
     expect(message?.payload).not.toHaveProperty('fill');
   });
 
+  it('shapeJob carries the style options', () => {
+    const arrow: Shape = {
+      ...shape('a1', 'arrow'),
+      type: 'arrow',
+      strokeStyle: 'dashed',
+      opacity: 0.4,
+      startHead: 'dot',
+      route: 'elbow',
+    };
+    const [message] = shapeJob(arrow).messages;
+    expect(message?.payload).toMatchObject({
+      strokeStyle: 'dashed',
+      opacity: 0.4,
+      startHead: 'dot',
+      route: 'elbow',
+    });
+  });
+
   it('replays a shape the server does not have, on top of the server board', () => {
     const pending = new PendingSync();
     pending.addShape(shape('mine'));

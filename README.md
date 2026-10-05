@@ -11,7 +11,10 @@ cursors and presence. No account needed.
 ## Features
 
 - Freehand pen and whole-stroke eraser, color picker, adjustable stroke width
-- Shapes: rectangle, ellipse, line and arrow, with outline color and width and an optional fill. They appear for others when you release the mouse
+- Shapes: rectangle, ellipse, diamond, triangle, hexagon, cylinder, star, line and arrow. They appear for others when you release the mouse
+  - Style panel: color swatches, solid / hatched / cross-hatched fill, solid / dashed / dotted outline, rounded corners, opacity, straight or elbow lines, and five arrowhead styles for each end of an arrow. The last style used is remembered
+  - Precision: Shift snaps lines to 15° steps and makes squares and circles, Alt draws from the center, and an optional dot grid (Ctrl + ') snaps shapes to it. A label shows the size, or length and angle, while dragging
+  - Keyboard: P pen, E eraser, H hand, R rectangle, O ellipse, D diamond, L line, A arrow
 - Real-time sync: remote strokes appear while they are being drawn
 - Live cursors with name labels, plus a participant list (names are editable)
 - Clear board (with confirmation), synced to everyone

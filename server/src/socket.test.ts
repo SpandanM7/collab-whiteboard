@@ -220,7 +220,7 @@ describe('element:add', () => {
   });
 
   it.each([
-    ['unknown type', { ...shape, type: 'triangle' }],
+    ['unknown type', { ...shape, type: 'trapezoid' }],
     ['bad color', { ...shape, color: 'red' }],
     ['coordinate out of range', { ...shape, end: { x: 1e9, y: 0 } }],
     ['missing end point', { ...shape, end: undefined }],

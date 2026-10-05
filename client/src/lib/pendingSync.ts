@@ -74,13 +74,14 @@ export function strokeJob(stroke: Stroke, replaceServerCopy: boolean): Job {
 
 /** A shape goes out as one message, so unlike a stroke it is never left half-sent. */
 export function shapeJob(shape: Shape): Job {
-  const { id, color, width, start, end } = shape;
-  const base = { id, color, width, start, end };
-  const payload: ElementAddPayload =
-    shape.type === 'rect' || shape.type === 'ellipse'
-      ? { ...base, type: shape.type, fill: shape.fill }
-      : { ...base, type: shape.type };
-  return { kind: 'shape', id, messages: [{ event: CLIENT_EVENTS.elementAdd, payload }] };
+  // The server sets the author and the time; everything else (style included) is sent as is.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- dropped from the payload
+  const { authorId, createdAt, ...payload } = shape;
+  return {
+    kind: 'shape',
+    id: shape.id,
+    messages: [{ event: CLIENT_EVENTS.elementAdd, payload }],
+  };
 }
 
 type Entry = { element: BoardElement; onServer: boolean };

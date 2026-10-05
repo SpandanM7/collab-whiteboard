@@ -30,6 +30,26 @@ export const strokeSchema = z.object({
   createdAt: z.number(),
 });
 
+/** Shapes with an inside: they can be filled. */
+export const CLOSED_SHAPE_TYPES = [
+  'rect',
+  'ellipse',
+  'diamond',
+  'triangle',
+  'hexagon',
+  'star',
+  'cylinder',
+] as const;
+/** Shapes that run from a tail (`start`) to a head (`end`). */
+export const LINE_SHAPE_TYPES = ['line', 'arrow'] as const;
+export const SHAPE_TYPES = [...CLOSED_SHAPE_TYPES, ...LINE_SHAPE_TYPES] as const;
+
+export const STROKE_STYLES = ['solid', 'dashed', 'dotted'] as const;
+export const FILL_STYLES = ['solid', 'hatch', 'cross'] as const;
+export const ARROWHEADS = ['none', 'arrow', 'triangle', 'dot', 'bar'] as const;
+/** `elbow` runs in right angles: along one axis, across, then along it again. */
+export const LINE_ROUTES = ['straight', 'elbow'] as const;
+
 const shapeFields = {
   id: idSchema,
   authorId: idSchema,
@@ -37,43 +57,46 @@ const shapeFields = {
   /** Outline width in board units. */
   width: z.number().min(1).max(LIMITS.maxStrokeWidth),
   /**
-   * The two corners the user dragged between. For rect and ellipse they span the bounding box
-   * (in any order); for line and arrow they are the tail and the head.
+   * The two corners the user dragged between. For closed shapes they span the bounding box (in
+   * any order); for line and arrow they are the tail and the head.
    */
   start: pointSchema,
   end: pointSchema,
   createdAt: z.number(),
+  /** Absent means solid. */
+  strokeStyle: z.enum(STROKE_STYLES).optional(),
+  /** Absent means fully opaque. */
+  opacity: z.number().min(0.1).max(1).optional(),
 };
 
-export const rectSchema = z.object({
+export const closedShapeSchema = z.object({
   ...shapeFields,
-  type: z.literal('rect'),
+  type: z.enum(CLOSED_SHAPE_TYPES),
   /** Fill color; absent means outline only. */
   fill: colorSchema.optional(),
+  /** How the fill is painted; absent means solid. */
+  fillStyle: z.enum(FILL_STYLES).optional(),
+  /** Rounded corners (shapes with corners only). */
+  rounded: z.boolean().optional(),
 });
-export const ellipseSchema = z.object({
+
+export const lineShapeSchema = z.object({
   ...shapeFields,
-  type: z.literal('ellipse'),
-  fill: colorSchema.optional(),
+  type: z.enum(LINE_SHAPE_TYPES),
+  /** Absent means no head at the tail. */
+  startHead: z.enum(ARROWHEADS).optional(),
+  /** Absent means an open arrow head on an arrow, and no head on a line. */
+  endHead: z.enum(ARROWHEADS).optional(),
+  /** Absent means straight. */
+  route: z.enum(LINE_ROUTES).optional(),
 });
-export const lineSchema = z.object({ ...shapeFields, type: z.literal('line') });
-export const arrowSchema = z.object({ ...shapeFields, type: z.literal('arrow') });
 
-export const SHAPE_TYPES = ['rect', 'ellipse', 'line', 'arrow'] as const;
-
-export const shapeSchema = z.discriminatedUnion('type', [
-  rectSchema,
-  ellipseSchema,
-  lineSchema,
-  arrowSchema,
-]);
+export const shapeSchema = z.discriminatedUnion('type', [closedShapeSchema, lineShapeSchema]);
 
 export const boardElementSchema = z.discriminatedUnion('type', [
   strokeSchema,
-  rectSchema,
-  ellipseSchema,
-  lineSchema,
-  arrowSchema,
+  closedShapeSchema,
+  lineShapeSchema,
 ]);
 
 export const boardSchema = z.object({
@@ -93,8 +116,23 @@ export const participantSchema = z.object({
 
 export type Point = z.infer<typeof pointSchema>;
 export type Stroke = z.infer<typeof strokeSchema>;
+export type ClosedShape = z.infer<typeof closedShapeSchema>;
+export type LineShape = z.infer<typeof lineShapeSchema>;
 export type Shape = z.infer<typeof shapeSchema>;
 export type ShapeType = Shape['type'];
+export type ClosedShapeType = ClosedShape['type'];
+export type StrokeStyle = (typeof STROKE_STYLES)[number];
+export type FillStyle = (typeof FILL_STYLES)[number];
+export type Arrowhead = (typeof ARROWHEADS)[number];
+export type LineRoute = (typeof LINE_ROUTES)[number];
 export type BoardElement = z.infer<typeof boardElementSchema>;
 export type Board = z.infer<typeof boardSchema>;
 export type Participant = z.infer<typeof participantSchema>;
+
+export function isClosedShapeType(type: string): type is ClosedShapeType {
+  return (CLOSED_SHAPE_TYPES as readonly string[]).includes(type);
+}
+
+export function isClosedShape(shape: Shape): shape is ClosedShape {
+  return isClosedShapeType(shape.type);
+}
