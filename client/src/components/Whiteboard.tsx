@@ -1,11 +1,24 @@
 import { nanoid } from 'nanoid';
 import { useLayoutEffect, useRef } from 'react';
 import type { PointerEvent } from 'react';
-import type { BoardElement, Point, Shape, Stroke } from '@whiteboard/shared';
+import type { BoardElement, Point, Shape, ShapeType, Stroke } from '@whiteboard/shared';
 import { toBoard } from '../lib/coords.ts';
 import { drawElement, drawShape, drawStroke } from '../lib/drawing.ts';
 import { elementBounds, elementHit, rectsIntersect } from '../lib/geometry.ts';
-import { clampScale, panBy, toBoardPoint, visibleRect, zoomAt } from '../lib/view.ts';
+import type { Rect } from '../lib/geometry.ts';
+import { dragReadout, dragShape, gridStep } from '../lib/shapeDrag.ts';
+import { isTypingTarget } from '../lib/shortcuts.ts';
+import type { DragModifiers } from '../lib/shapeDrag.ts';
+import { createShape } from '../lib/toolStyle.ts';
+import type { ToolStyle } from '../lib/toolStyle.ts';
+import {
+  clampScale,
+  panBy,
+  toBoardPoint,
+  toScreenPoint,
+  visibleRect,
+  zoomAt,
+} from '../lib/view.ts';
 import type { View } from '../lib/view.ts';
 import { isShapeTool } from '../types.ts';
 import type { Tool } from '../types.ts';
@@ -26,10 +39,10 @@ type Props = {
   /** Strokes other people are still drawing; repainted every frame on top of the cache. */
   liveStrokes: Stroke[];
   tool: Tool;
-  color: string;
-  width: number;
-  /** Fill color for new rectangles and ellipses; null draws them as outlines. */
-  fill: string | null;
+  /** Color, width and shape options for new strokes and shapes. */
+  style: ToolStyle;
+  /** Show the dot grid, and snap shapes to it. */
+  grid: boolean;
   /** Where this person is looking: pan and zoom. Local only, never synced. */
   view: View;
   /** The person moved or zoomed the view (drag, pinch, wheel). */
@@ -53,12 +66,18 @@ type Pan = { id: number; startX: number; startY: number; startView: View };
 /** Two fingers moving and zooming the view. `anchor` is the board point that stays under them. */
 type Pinch = { ids: [number, number]; anchor: Point; startDistance: number; startScale: number };
 
-function isTypingTarget(target: EventTarget | null): boolean {
-  return (
-    target instanceof Element &&
-    target.closest('input, textarea, select, [contenteditable]') !== null
-  );
-}
+/** A shape being dragged out: where it began, where the pointer is, and the modifier keys. */
+type ShapeDrag = {
+  type: ShapeType;
+  origin: Point;
+  pointer: Point;
+  mods: DragModifiers;
+  /** Touch puts the size readout above the finger instead of beside the pointer. */
+  touch: boolean;
+};
+
+const GRID_DOT_COLOR = '#c9c8cc';
+const READOUT_FONT = '12px system-ui, "Segoe UI", Roboto, sans-serif';
 
 export function Whiteboard(props: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -71,6 +90,7 @@ export function Whiteboard(props: Props) {
   const activeRef = useRef<Stroke | null>(null);
   // The shape being dragged out. Local only until release, so it needs no network handling.
   const shapeRef = useRef<Shape | null>(null);
+  const dragRef = useRef<ShapeDrag | null>(null);
   const pointerIdRef = useRef<number | null>(null);
   const panRef = useRef<Pan | null>(null);
   const pinchRef = useRef<Pinch | null>(null);
@@ -105,7 +125,64 @@ export function Whiteboard(props: Props) {
     applyView(ctx, view);
     for (const stroke of propsRef.current.liveStrokes) drawStroke(ctx, stroke);
     if (activeRef.current) drawStroke(ctx, activeRef.current);
-    if (shapeRef.current) drawShape(ctx, shapeRef.current);
+    if (shapeRef.current) {
+      drawShape(ctx, shapeRef.current);
+      if (dragRef.current) drawReadout(ctx, shapeRef.current, dragRef.current, view);
+    }
+  };
+
+  /** The size (or length and angle) of the shape being dragged, in a label by the pointer. */
+  const drawReadout = (
+    ctx: CanvasRenderingContext2D,
+    shape: Shape,
+    drag: ShapeDrag,
+    view: View,
+  ) => {
+    const dpr = window.devicePixelRatio || 1;
+    const text = dragReadout(shape.type, shape.start, shape.end);
+    const at = toScreenPoint(drag.pointer, view);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.font = READOUT_FONT;
+    const width = ctx.measureText(text).width + 12;
+    const height = 20;
+    const x = at.x + 14;
+    const y = drag.touch ? at.y - 56 : at.y + 18;
+    ctx.fillStyle = 'rgba(26, 26, 26, 0.85)';
+    ctx.beginPath();
+    ctx.roundRect(x, y, width, height, 6);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, x + 6, y + height / 2);
+  };
+
+  /** A dot at every grid point on screen, spaced further apart when zoomed far out. */
+  const drawGrid = (ctx: CanvasRenderingContext2D, view: View, visible: Rect) => {
+    const step = gridStep(view.scale);
+    const r = 1 / view.scale; // one screen pixel
+    ctx.fillStyle = GRID_DOT_COLOR;
+    for (let x = Math.ceil(visible.left / step) * step; x <= visible.right; x += step) {
+      for (let y = Math.ceil(visible.top / step) * step; y <= visible.bottom; y += step) {
+        ctx.fillRect(x - r, y - r, 2 * r, 2 * r);
+      }
+    }
+  };
+
+  /** Recomputes the dragged shape's corners from the pointer, the keys held and the grid. */
+  const updateShapeDrag = () => {
+    const drag = dragRef.current;
+    const shape = shapeRef.current;
+    if (!drag || !shape) return;
+    const { start, end } = dragShape(
+      drag.type,
+      drag.origin,
+      drag.pointer,
+      drag.mods,
+      propsRef.current.grid,
+    );
+    shape.start = start;
+    shape.end = end;
+    schedulePaint();
   };
 
   const schedulePaint = () => {
@@ -128,6 +205,7 @@ export function Whiteboard(props: Props) {
     applyView(ctx, view);
     // Elements off screen cost nothing, so a big board stays smooth while panning.
     const visible = visibleRect(view, { width: cache.width / dpr, height: cache.height / dpr });
+    if (propsRef.current.grid) drawGrid(ctx, view, visible);
     for (const element of propsRef.current.elements) {
       if (rectsIntersect(elementBounds(element), visible)) drawElement(ctx, element);
     }
@@ -208,6 +286,7 @@ export function Whiteboard(props: Props) {
     // Space + drag pans, like most drawing tools. Only while the pointer is over the board, so
     // Space still works on buttons and in text fields.
     const onKeyDown = (e: KeyboardEvent) => {
+      if (updateDragKeys(e)) return;
       if (e.code !== 'Space' || isTypingTarget(e.target) || !hoveringRef.current) return;
       e.preventDefault();
       if (e.repeat) return;
@@ -215,6 +294,7 @@ export function Whiteboard(props: Props) {
       if (!panRef.current) setPanState('ready');
     };
     const onKeyUp = (e: KeyboardEvent) => {
+      if (updateDragKeys(e)) return;
       if (e.code !== 'Space') return;
       if (hoveringRef.current && !isTypingTarget(e.target)) e.preventDefault();
       releaseSpace();
@@ -222,6 +302,15 @@ export function Whiteboard(props: Props) {
     const releaseSpace = () => {
       spaceRef.current = false;
       if (!panRef.current) setPanState('');
+    };
+    // Shift or Alt pressed or released mid-drag reshapes the shape without the pointer moving.
+    const updateDragKeys = (e: KeyboardEvent): boolean => {
+      const drag = dragRef.current;
+      if (!drag || (e.key !== 'Shift' && e.key !== 'Alt')) return false;
+      if (e.key === 'Alt') e.preventDefault(); // Windows would otherwise focus the browser menu
+      drag.mods = { shift: e.shiftKey, alt: e.altKey };
+      updateShapeDrag();
+      return true;
     };
 
     canvas.addEventListener('wheel', onWheel, { passive: false });
@@ -238,12 +327,12 @@ export function Whiteboard(props: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Redraw from element data. Layout effect so the frame never shows an element missing.
+  // Redraw from element data (or the grid). Layout effect so no frame shows an element missing.
   useLayoutEffect(() => {
     rebuildCache();
     paint();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.elements]);
+  }, [props.elements, props.grid]);
 
   // The view was changed from outside (zoom buttons, fit, jump to a person).
   useLayoutEffect(() => {
@@ -271,6 +360,7 @@ export function Whiteboard(props: Props) {
     if (activeRef.current || shapeRef.current) {
       activeRef.current = null;
       shapeRef.current = null;
+      dragRef.current = null;
       paint();
     }
     // paint only touches refs, so it is safe to omit.
@@ -293,6 +383,7 @@ export function Whiteboard(props: Props) {
     const stroke = activeRef.current;
     activeRef.current = null;
     shapeRef.current = null;
+    dragRef.current = null;
     if (stroke) propsRef.current.onStrokeCancel(stroke.id);
     pointerIdRef.current = null;
     panRef.current = null;
@@ -321,7 +412,7 @@ export function Whiteboard(props: Props) {
   };
 
   const handlePointerDown = (e: PointerEvent<HTMLCanvasElement>) => {
-    const { disabled, tool, color, width, fill } = propsRef.current;
+    const { disabled, tool, style } = propsRef.current;
     if (disabled) return;
     const canvas = e.currentTarget;
 
@@ -365,28 +456,33 @@ export function Whiteboard(props: Props) {
       return;
     }
     if (isShapeTool(tool)) {
-      const base = {
-        id: nanoid(),
-        authorId: LOCAL_AUTHOR_ID,
-        color,
-        width,
-        start: point,
-        end: point,
-        createdAt: Date.now(),
+      shapeRef.current = createShape(
+        tool,
+        {
+          id: nanoid(),
+          authorId: LOCAL_AUTHOR_ID,
+          createdAt: Date.now(),
+          start: point,
+          end: point,
+        },
+        style,
+      );
+      dragRef.current = {
+        type: tool,
+        origin: point,
+        pointer: point,
+        mods: { shift: e.shiftKey, alt: e.altKey },
+        touch: e.pointerType === 'touch',
       };
-      shapeRef.current =
-        tool === 'rect' || tool === 'ellipse'
-          ? { ...base, type: tool, ...(fill ? { fill } : {}) }
-          : { ...base, type: tool };
-      schedulePaint();
+      updateShapeDrag();
       return;
     }
     activeRef.current = {
       id: nanoid(),
       type: 'stroke',
       authorId: LOCAL_AUTHOR_ID,
-      color,
-      width,
+      color: style.color,
+      width: style.width,
       points: [point],
       createdAt: Date.now(),
     };
@@ -422,9 +518,10 @@ export function Whiteboard(props: Props) {
 
     if (propsRef.current.tool === 'eraser') {
       erase(points);
-    } else if (shapeRef.current) {
-      shapeRef.current.end = points[points.length - 1];
-      schedulePaint();
+    } else if (dragRef.current) {
+      dragRef.current.pointer = points[points.length - 1];
+      dragRef.current.mods = { shift: e.shiftKey, alt: e.altKey };
+      updateShapeDrag();
     } else if (activeRef.current) {
       activeRef.current.points.push(...points);
       propsRef.current.onStrokePoints(activeRef.current.id, points);
@@ -460,6 +557,7 @@ export function Whiteboard(props: Props) {
     const shape = shapeRef.current;
     activeRef.current = null;
     shapeRef.current = null;
+    dragRef.current = null;
     if (shape) {
       const { start, end } = shape;
       const size = Math.hypot(end.x - start.x, end.y - start.y) * viewRef.current.scale;
