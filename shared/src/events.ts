@@ -2,14 +2,12 @@ import { z } from 'zod';
 import {
   boardIdSchema,
   boardSchema,
+  closedShapeSchema,
   colorSchema,
   idSchema,
-  arrowSchema,
-  ellipseSchema,
-  lineSchema,
+  lineShapeSchema,
   participantSchema,
   pointSchema,
-  rectSchema,
   shapeSchema,
 } from './board.ts';
 import { LIMITS } from './limits.ts';
@@ -72,10 +70,8 @@ export const strokeEndPayload = z.object({ id: idSchema });
  */
 const shapeOmit = { authorId: true, createdAt: true } as const;
 export const elementAddPayload = z.discriminatedUnion('type', [
-  rectSchema.omit(shapeOmit),
-  ellipseSchema.omit(shapeOmit),
-  lineSchema.omit(shapeOmit),
-  arrowSchema.omit(shapeOmit),
+  closedShapeSchema.omit(shapeOmit),
+  lineShapeSchema.omit(shapeOmit),
 ]);
 
 export const elementDeletePayload = z.object({ id: idSchema });

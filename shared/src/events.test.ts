@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   LIMITS,
+  SHAPE_TYPES,
   boardClearPayload,
   cursorMovePayload,
   cursorMovedPayload,
@@ -158,7 +159,7 @@ describe('elementAddPayload', () => {
     end: { x: 50, y: 60 },
   };
 
-  it.each(['rect', 'ellipse', 'line', 'arrow'])('accepts a %s', (type) => {
+  it.each([...SHAPE_TYPES])('accepts a %s', (type) => {
     expect(elementAddPayload.safeParse({ ...rect, type }).success).toBe(true);
   });
 
@@ -177,8 +178,33 @@ describe('elementAddPayload', () => {
     expect(elementAddPayload.parse({ ...rect, type: 'line' })).not.toHaveProperty('fill');
   });
 
+  it('keeps the style options of a closed shape', () => {
+    const styled = {
+      ...rect,
+      type: 'diamond',
+      strokeStyle: 'dashed',
+      opacity: 0.5,
+      fillStyle: 'hatch',
+      rounded: true,
+    };
+    expect(elementAddPayload.parse(styled)).toEqual(styled);
+  });
+
+  it('keeps the heads and route of an arrow, and drops closed-shape options from it', () => {
+    const arrow = { ...rect, type: 'arrow', startHead: 'dot', endHead: 'triangle', route: 'elbow' };
+    const parsed = elementAddPayload.parse({ ...arrow, rounded: true, fillStyle: 'hatch' });
+    expect(parsed).toMatchObject({ startHead: 'dot', endHead: 'triangle', route: 'elbow' });
+    expect(parsed).not.toHaveProperty('rounded');
+    expect(parsed).not.toHaveProperty('fillStyle');
+  });
+
   it.each([
-    ['unknown type', { type: 'star' }],
+    ['unknown type', { type: 'trapezoid' }],
+    ['unknown outline style', { strokeStyle: 'wavy' }],
+    ['opacity above 1', { opacity: 1.5 }],
+    ['invisible opacity', { opacity: 0 }],
+    ['unknown fill style', { fillStyle: 'dots' }],
+    ['non-boolean rounded', { rounded: 'yes' }],
     ['stroke type', { type: 'stroke' }],
     ['bad fill color', { fill: 'blue' }],
     ['zero width', { width: 0 }],
@@ -187,6 +213,15 @@ describe('elementAddPayload', () => {
     ['missing end', { end: undefined }],
   ])('rejects %s', (_label, override) => {
     expect(elementAddPayload.safeParse({ ...rect, ...override }).success).toBe(false);
+  });
+
+  it.each([
+    ['unknown head', { startHead: 'feather' }],
+    ['unknown route', { route: 'curvy' }],
+  ])('rejects an arrow with an %s', (_label, override) => {
+    expect(elementAddPayload.safeParse({ ...rect, type: 'arrow', ...override }).success).toBe(
+      false,
+    );
   });
 });
 
