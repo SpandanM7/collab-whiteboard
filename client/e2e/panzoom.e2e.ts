@@ -108,7 +108,13 @@ test('Ctrl + wheel zooms toward the cursor', async ({ page }) => {
 test('the hand tool drags the board', async ({ page }) => {
   await open(page);
   const { x, y } = await drawLine(page);
-  await page.getByRole('button', { name: 'Hand' }).click();
+  // In the toolbar on wide screens; in the More menu on small ones.
+  const hand = page.getByRole('button', { name: 'Hand' });
+  if (await hand.isVisible()) await hand.click();
+  else {
+    await page.getByRole('button', { name: 'More' }).click();
+    await page.getByRole('menuitem', { name: 'Hand (pan)' }).click();
+  }
   await page.mouse.move(x + 30, y + 60);
   await page.mouse.down();
   await page.mouse.move(x + 30 + 90, y + 60 + 20, { steps: 6 });

@@ -14,16 +14,21 @@ cursors and presence. No account needed.
 - Shapes: rectangle, ellipse, diamond, triangle, hexagon, cylinder, star, line and arrow. They appear for others when you release the mouse
   - Style panel: color swatches, solid / hatched / cross-hatched fill, solid / dashed / dotted outline, rounded corners, opacity, straight or elbow lines, and five arrowhead styles for each end of an arrow. The last style used is remembered
   - Precision: Shift snaps lines to 15° steps and makes squares and circles, Alt draws from the center, and an optional dot grid (Ctrl + ') snaps shapes to it. A label shows the size, or length and angle, while dragging
-  - Keyboard: P pen, E eraser, H hand, R rectangle, O ellipse, D diamond, L line, A arrow
+  - Keyboard: V select, P pen, E eraser, H hand, T text, R rectangle, O ellipse, D diamond, L line, A arrow (press ? for every shortcut)
+- Select, move and resize: click, Shift+click or drag a marquee; drag to move (Shift locks the axis, the grid snaps); eight handles resize (Shift keeps proportions, Alt resizes from the center, dragging past the opposite side flips); lines and arrows get a handle on each end. Arrow keys nudge. A floating bar (and shortcuts) duplicates, brings to front, sends to back and deletes; the style panel restyles the selection
+- Text: click with the Text tool (or double-click the board) and type in place; four fonts, four sizes, alignment, color and opacity. Double-click or Enter edits it
+- Copy, cut and paste (Ctrl+C / X / V) between boards and tabs; pasting plain text makes a text element. Ctrl+D duplicates
+- Undo and redo (Ctrl+Z, Ctrl+Shift+Z / Ctrl+Y, or the buttons), per person: undo only reverts your own changes and never overwrites someone else's newer edit. One eraser drag or a burst of nudges is one step
+- Export as PNG: whole board or just the selection, white or transparent background, 1x to 3x, with a live preview; download, copy to the clipboard, or share from a phone
 - Real-time sync: remote strokes appear while they are being drawn
 - Live cursors with name labels, plus a participant list (names are editable)
 - Clear board (with confirmation), synced to everyone
 - Share button that copies the board link (with a manual-copy fallback)
-- Connection states (connecting / connected / reconnecting); drawing pauses while offline
+- Connection states (connecting / connected / reconnecting). Everything but Clear keeps working offline and syncs on reconnect
 - Automatic rejoin and full board state on reconnect
 - Server-side validation, size limits and per-socket rate limiting
 - Pan and zoom, per person (an infinite canvas): wheel or trackpad, Space + drag, the Hand tool, two-finger drag and pinch on touch screens, zoom buttons, and Fit all. Markers at the screen edge point to people who are off screen; click one to jump to them
-- Works with mouse, touch and pen (pointer events)
+- Works with mouse, touch and pen (pointer events). On phones and tablets the toolbar moves to the bottom, color and width live in the Style sheet, undo/redo and zoom sit at the screen edges, and handles are finger-sized
 
 ## Tech stack
 
@@ -76,9 +81,11 @@ Copy the `.env.example` files; never commit `.env`.
 ## Limits
 
 Enforced by the server (`shared/src/limits.ts`), sized for a small free instance: 200 points per
-message, 5,000 points per stroke, 2,000 elements and 100,000 points per board, 10 participants per
-room, 30 boards in memory (an empty board is dropped after 6 hours idle), and 100 events per second
-per socket (burst of 150).
+message, 5,000 points per stroke, 2,000 elements and 100,000 points per board, 2,000 characters per
+text, 200 elements or 5,000 points per element batch, 10 participants per room, 30 boards in memory
+(an empty board is dropped after 6 hours idle), and 100 events per second per socket (burst of 150;
+a batch carrying stroke points costs one extra token per 1,000 points). Socket messages are capped
+at 256 KB.
 
 ## Project structure
 

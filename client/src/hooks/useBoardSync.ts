@@ -3,16 +3,17 @@ import { io } from 'socket.io-client';
 import type { Socket } from 'socket.io-client';
 import { CLIENT_EVENTS, LIMITS, SERVER_EVENTS } from '@whiteboard/shared';
 import type {
+  BoardElement,
   ClientToServerEvents,
   ErrorCode,
   Point,
+  ReorderTarget,
   ServerToClientEvents,
-  Shape,
   Stroke,
 } from '@whiteboard/shared';
 import type { Identity } from '../lib/identity.ts';
-import { PendingSync, shapeJob } from '../lib/pendingSync.ts';
-import type { Job, Outgoing } from '../lib/pendingSync.ts';
+import { PendingSync, takeFromOutbox } from '../lib/pendingSync.ts';
+import type { Job, Outgoing, OutboxItem } from '../lib/pendingSync.ts';
 import { boardReducer, initialBoardState } from './boardReducer.ts';
 import { initialPresenceState, presenceReducer } from './presenceReducer.ts';
 
@@ -24,8 +25,8 @@ type AppSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 const BATCH_INTERVAL_MS = 25;
 
 /**
- * Replaying unsynced work: at most this many messages per interval (about 50 per second). The
- * server allows 100 events/s per socket, and live drawing and cursor updates share that budget.
+ * Sending queued work: at most this many rate-limit tokens per interval (about 50 per second).
+ * The server allows 100 per second per socket, and live drawing and cursor updates share that.
  */
 const OUTBOX_BATCH = 5;
 const OUTBOX_INTERVAL_MS = 100;
@@ -45,7 +46,7 @@ const QUIET_ERRORS: ReadonlySet<ErrorCode> = new Set([
 /** Errors that mean we have no usable board at all, so the UI blocks instead of toasting. */
 const JOIN_ERRORS: ReadonlySet<ErrorCode> = new Set(['room_full', 'server_full']);
 
-export type Toast = { id: number; message: string };
+export type Toast = { id: number; message: string; kind: 'error' | 'info' };
 
 const serverUrl = import.meta.env.VITE_SERVER_URL as string | undefined;
 
@@ -64,6 +65,18 @@ function sendMessage(socket: AppSocket, message: Outgoing): void {
       socket.emit(message.event, message.payload);
       break;
     case CLIENT_EVENTS.strokeEnd:
+      socket.emit(message.event, message.payload);
+      break;
+    case CLIENT_EVENTS.elementsAdd:
+      socket.emit(message.event, message.payload);
+      break;
+    case CLIENT_EVENTS.elementsUpdate:
+      socket.emit(message.event, message.payload);
+      break;
+    case CLIENT_EVENTS.elementsDelete:
+      socket.emit(message.event, message.payload);
+      break;
+    case CLIENT_EVENTS.elementsReorder:
       socket.emit(message.event, message.payload);
       break;
   }
@@ -88,6 +101,8 @@ export function useBoardSync(boardId: string, identity: Identity) {
   const [pendingSync] = useState(() => new PendingSync());
   /** Changes the server has not confirmed yet (drives the status pill and the unload warning). */
   const [unsynced, setUnsynced] = useState(0);
+  /** Goes up whenever the board is cleared (by anyone), so undo history can be dropped. */
+  const [clearCount, setClearCount] = useState(0);
 
   const socketRef = useRef<AppSocket | null>(null);
   /** True between receiving room:state and the next disconnect: the server knows about us. */
@@ -102,7 +117,7 @@ export function useBoardSync(boardId: string, identity: Identity) {
   const pendingRef = useRef<{ id: string; points: Point[] } | null>(null);
   const flushTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   /** Replay queue: jobs being sent to the server, and how far into the current job we are. */
-  const outboxRef = useRef<{ job: Job; next: number }[]>([]);
+  const outboxRef = useRef<OutboxItem[]>([]);
   const outboxTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   /** Latest identity, read when (re)joining so a reconnect uses the current name. */
   const identityRef = useRef(identity);
@@ -112,8 +127,8 @@ export function useBoardSync(boardId: string, identity: Identity) {
     timer: ReturnType<typeof setTimeout> | undefined;
   }>({ latest: null, lastSentAt: 0, timer: undefined });
 
-  const showToast = useCallback((message: string) => {
-    setToast({ id: ++toastIdRef.current, message });
+  const showToast = useCallback((message: string, kind: Toast['kind'] = 'error') => {
+    setToast({ id: ++toastIdRef.current, message, kind });
   }, []);
 
   /** Whether the stroke being drawn is known to the server on the current connection. */
@@ -152,25 +167,13 @@ export function useBoardSync(boardId: string, identity: Identity) {
       if (!socket || !joinedRef.current) return;
 
       const outbox = outboxRef.current;
-      let budget = OUTBOX_BATCH;
-      while (budget > 0) {
-        const item = outbox[0];
-        if (!item) break;
-        // Erased or cleared since it was queued: nothing left to send for it.
-        if (!pendingSync.isActive(item.job)) {
-          outbox.shift();
-          continue;
-        }
-        const message = item.job.messages[item.next++];
-        if (message) {
-          sendMessage(socket, message);
-          budget--;
-        }
-        if (item.next >= item.job.messages.length) {
-          pendingSync.resolve(item.job);
-          outbox.shift();
-        }
-      }
+      const { messages, finished } = takeFromOutbox(
+        outbox,
+        (job) => pendingSync.isActive(job),
+        OUTBOX_BATCH,
+      );
+      for (const message of messages) sendMessage(socket, message);
+      for (const job of finished) pendingSync.resolve(job);
       setUnsynced(pendingSync.size);
       if (outbox.length > 0) outboxTimerRef.current = setTimeout(drain, OUTBOX_INTERVAL_MS);
     },
@@ -261,11 +264,22 @@ export function useBoardSync(boardId: string, identity: Identity) {
     socket.on(SERVER_EVENTS.strokeEnd, ({ id }) => dispatch({ type: 'remote-end', id }));
     socket.on(SERVER_EVENTS.elementAdded, (element) => dispatch({ type: 'remote-add', element }));
     socket.on(SERVER_EVENTS.elementDeleted, ({ id }) => dispatch({ type: 'delete', ids: [id] }));
+    socket.on(SERVER_EVENTS.elementsAdded, ({ elements }) =>
+      dispatch({ type: 'add-many', elements }),
+    );
+    socket.on(SERVER_EVENTS.elementsUpdated, ({ elements }) =>
+      dispatch({ type: 'update', elements }),
+    );
+    socket.on(SERVER_EVENTS.elementsDeleted, ({ ids }) => dispatch({ type: 'delete', ids }));
+    socket.on(SERVER_EVENTS.elementsReordered, ({ ids, to }) =>
+      dispatch({ type: 'reorder', ids, to }),
+    );
     socket.on(SERVER_EVENTS.boardCleared, () => {
       // Whatever we had not uploaded yet was drawn before this clear; do not resurrect it.
       pendingSync.clear();
       resetOutbox();
       setUnsynced(0);
+      setClearCount((n) => n + 1);
       dispatch({ type: 'clear' });
     });
     socket.on(SERVER_EVENTS.participantJoined, (participant) => {
@@ -403,23 +417,55 @@ export function useBoardSync(boardId: string, identity: Identity) {
     [emitIfJoined, enqueueJob, flushPoints, isLive, pendingSync],
   );
 
+  /** Hands a job to the outbox when joined; otherwise it waits for the next room:state. */
+  const submit = useCallback(
+    (job: Job) => {
+      if (joinedRef.current) enqueueJob(job);
+    },
+    [enqueueJob],
+  );
+
   /**
-   * A local shape was finished. It is already on screen; others only see it now, on release. Made
-   * while not joined, it is kept as pending work and replayed after the next room:state.
+   * Finished elements: a shape or text just made, or something pasted, duplicated or restored by
+   * undo. They are already on screen; each stays pending until sent, so a dropped connection
+   * cannot lose it.
    */
-  const addShape = useCallback(
-    (shape: Shape) => {
-      dispatch({ type: 'add-local', element: shape });
-      if (joinedRef.current) {
-        emitIfJoined((socket) => {
-          for (const message of shapeJob(shape).messages) sendMessage(socket, message);
-        });
-        return;
+  const addElements = useCallback(
+    (elements: BoardElement[]) => {
+      if (elements.length === 0) return;
+      dispatch({ type: 'add-many', elements });
+      for (const element of elements) {
+        // Erased offline and brought back before the erase went out: the server still has it.
+        const job = pendingSync.cancelDelete(element.id)
+          ? pendingSync.update(element)
+          : pendingSync.addElement(element);
+        submit(job);
       }
-      pendingSync.addShape(shape);
       setUnsynced(pendingSync.size);
     },
-    [emitIfJoined, pendingSync],
+    [pendingSync, submit],
+  );
+
+  /** New versions of elements on the board (moved, resized, restyled, text edited, undone). */
+  const updateElements = useCallback(
+    (elements: BoardElement[]) => {
+      if (elements.length === 0) return;
+      dispatch({ type: 'update', elements });
+      for (const element of elements) submit(pendingSync.update(element));
+      setUnsynced(pendingSync.size);
+    },
+    [pendingSync, submit],
+  );
+
+  /** Moves elements to the top or bottom of the stack, for everyone. */
+  const reorderElements = useCallback(
+    (ids: string[], to: ReorderTarget) => {
+      if (ids.length === 0) return;
+      dispatch({ type: 'reorder', ids, to });
+      submit(pendingSync.queueReorder(ids, to));
+      setUnsynced(pendingSync.size);
+    },
+    [pendingSync, submit],
   );
 
   /** The local stroke was cancelled (e.g. pointercancel): remove it everywhere. */
@@ -441,13 +487,28 @@ export function useBoardSync(boardId: string, identity: Identity) {
 
   const deleteElements = useCallback(
     (ids: string[]) => {
+      if (ids.length === 0) return;
       dispatch({ type: 'delete', ids });
       const joined = joinedRef.current;
+      if (joined) {
+        // Sent straight away: removing the pending entries below cancels any queued add or
+        // update of these ids, so nothing sent later can bring them back.
+        emitIfJoined((socket) => {
+          if (ids.length === 1) {
+            socket.emit(CLIENT_EVENTS.elementDelete, { id: ids[0] });
+            return;
+          }
+          for (let i = 0; i < ids.length; i += LIMITS.maxIdsPerMessage) {
+            socket.emit(CLIENT_EVENTS.elementsDelete, {
+              ids: ids.slice(i, i + LIMITS.maxIdsPerMessage),
+            });
+          }
+        });
+      }
       for (const id of ids) {
         const entry = pendingSync.removeElement(id);
-        if (joined) {
-          emitIfJoined((socket) => socket.emit(CLIENT_EVENTS.elementDelete, { id }));
-        } else if (!entry || entry.onServer) {
+        if (joined) continue;
+        if (!entry || entry.onServer) {
           // The server may still hold it (a synced stroke, or a partial copy): erase it there
           // once we are back. A stroke the server never heard of needs nothing.
           pendingSync.queueDelete(id);
@@ -461,6 +522,7 @@ export function useBoardSync(boardId: string, identity: Identity) {
   /** Online only: replaying a clear later could wipe what others drew in the meantime. */
   const clearBoard = useCallback(() => {
     dispatch({ type: 'clear' });
+    setClearCount((n) => n + 1);
     pendingSync.clear();
     resetOutbox();
     setUnsynced(0);
@@ -476,12 +538,16 @@ export function useBoardSync(boardId: string, identity: Identity) {
     blocked,
     unsynced,
     toast,
+    showToast,
     dismissToast: useCallback(() => setToast(null), []),
+    clearCount,
     moveCursor,
     startStroke,
     addPoints,
     finishStroke,
-    addShape,
+    addElements,
+    updateElements,
+    reorderElements,
     cancelStroke,
     deleteElements,
     clearBoard,

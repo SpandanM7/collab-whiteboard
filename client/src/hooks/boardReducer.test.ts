@@ -154,3 +154,63 @@ describe('boardReducer', () => {
     });
   });
 });
+
+describe('batch actions', () => {
+  const shape = (id: string, x = 0): BoardElement => ({
+    id,
+    type: 'rect',
+    authorId: 'a',
+    color: '#000000',
+    width: 2,
+    start: { x, y: 0 },
+    end: { x: x + 10, y: 10 },
+    createdAt: 0,
+  });
+  const ids = (state: BoardState) => state.committed.map((e) => e.id);
+
+  it('adds several elements, skipping ones already there', () => {
+    const state = boardReducer(
+      { committed: [shape('a')], live: [] },
+      { type: 'add-many', elements: [shape('a'), shape('b'), shape('c')] },
+    );
+    expect(ids(state)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('updates elements in place and ignores unknown ids', () => {
+    const start: BoardState = { committed: [shape('a'), shape('b')], live: [] };
+    const moved = shape('a', 99);
+    const state = boardReducer(start, { type: 'update', elements: [moved, shape('zzz')] });
+    expect(ids(state)).toEqual(['a', 'b']);
+    expect(state.committed[0]).toBe(moved);
+    expect(boardReducer(start, { type: 'update', elements: [shape('zzz')] })).toBe(start);
+  });
+
+  it('finishes a live stroke that is replaced', () => {
+    const live = {
+      id: 's',
+      type: 'stroke' as const,
+      authorId: 'a',
+      color: '#000000',
+      width: 2,
+      points: [{ x: 0, y: 0 }],
+      createdAt: 0,
+    };
+    const replaced = { ...live, points: [{ x: 5, y: 5 }] };
+    const state = boardReducer(
+      { committed: [], live: [live] },
+      { type: 'update', elements: [replaced] },
+    );
+    expect(state.live).toEqual([]);
+    expect(state.committed).toEqual([replaced]);
+  });
+
+  it('reorders, and returns the same state when nothing moves', () => {
+    const start: BoardState = { committed: [shape('a'), shape('b'), shape('c')], live: [] };
+    expect(ids(boardReducer(start, { type: 'reorder', ids: ['a'], to: 'front' }))).toEqual([
+      'b',
+      'c',
+      'a',
+    ]);
+    expect(boardReducer(start, { type: 'reorder', ids: ['a'], to: 'back' })).toBe(start);
+  });
+});

@@ -5,7 +5,7 @@ export type RateLimit = {
   perSecond: number;
 };
 
-/** Token bucket: `take()` spends one token and reports whether the event is allowed. */
+/** Token bucket: `take()` spends tokens (one by default) and reports whether that was allowed. */
 export class TokenBucket {
   private tokens: number;
   private last: number;
@@ -18,13 +18,13 @@ export class TokenBucket {
     this.last = now();
   }
 
-  take(): boolean {
+  take(count = 1): boolean {
     const t = this.now();
     const elapsedSec = Math.max(0, t - this.last) / 1000;
     this.last = t;
     this.tokens = Math.min(this.limit.burst, this.tokens + elapsedSec * this.limit.perSecond);
-    if (this.tokens < 1) return false;
-    this.tokens -= 1;
+    if (this.tokens < count) return false;
+    this.tokens -= count;
     return true;
   }
 }

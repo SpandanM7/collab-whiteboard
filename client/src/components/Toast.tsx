@@ -15,7 +15,7 @@ export function Toast({ toast, onDismiss }: { toast: ToastData | null; onDismiss
   return (
     <div className="toast-region" role="status" aria-live="polite">
       {toast && (
-        <div className="toast" key={toast.id}>
+        <div className={`toast ${toast.kind}`} key={toast.id}>
           <span>{toast.message}</span>
           <button type="button" aria-label="Dismiss" onClick={onDismiss}>
             ×

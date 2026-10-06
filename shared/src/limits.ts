@@ -17,6 +17,21 @@ export const LIMITS = {
   /** Coordinates must be within +/- this value in board space. */
   maxCoordinate: 1_000_000,
   maxStrokeWidth: 100,
+  /** Characters in one text element. */
+  maxTextLength: 2_000,
+  minFontSize: 8,
+  maxFontSize: 200,
+  /** Max elements in one `elements:add` or `elements:update` message. The client chunks. */
+  maxElementsPerMessage: 200,
+  /** Max stroke points across one `elements:add` or `elements:update` message (one full stroke). */
+  maxPointsPerBatch: 5_000,
+  /** Max ids in one `elements:delete` or `elements:reorder` message (a whole board). */
+  maxIdsPerMessage: 2_000,
+  /**
+   * A batch carrying stroke points costs one extra rate-limit token per this many points, so
+   * moving big drawings is paced like drawing them was.
+   */
+  pointsPerToken: 1_000,
   maxNameLength: 32,
   /** A cursor with no update for this long is considered gone (server drops it, client hides it). */
   cursorTtlMs: 10_000,

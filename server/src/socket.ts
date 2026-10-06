@@ -8,12 +8,22 @@ import {
   cursorMovePayload,
   elementAddPayload,
   elementDeletePayload,
+  elementsAddPayload,
+  elementsDeletePayload,
+  elementsReorderPayload,
+  elementsUpdatePayload,
+  pointCountOf,
   roomJoinPayload,
   strokeEndPayload,
   strokePointsPayload,
   strokeStartPayload,
 } from '@whiteboard/shared';
-import type { ClientToServerEvents, ErrorCode, ServerToClientEvents } from '@whiteboard/shared';
+import type {
+  ClientToServerEvents,
+  ElementInput,
+  ErrorCode,
+  ServerToClientEvents,
+} from '@whiteboard/shared';
 import { TokenBucket } from './rateLimit.ts';
 import type { RateLimit } from './rateLimit.ts';
 import type { Result, Rooms } from './rooms.ts';
@@ -45,17 +55,32 @@ export function registerSocketHandlers(
   // Runs before every incoming event, so a flood is dropped before it is parsed or applied.
   const bucket = new TokenBucket(rateLimit);
   let lastRateError = -Infinity;
-  socket.use((_packet, next) => {
-    if (bucket.take()) {
-      next();
-      return;
-    }
+  const rateLimited = () => {
     const now = Date.now();
     if (now - lastRateError >= RATE_ERROR_INTERVAL_MS) {
       lastRateError = now;
       sendError('rate_limited', 'You are sending too fast. Some changes were dropped.');
     }
+  };
+  socket.use((_packet, next) => {
+    if (bucket.take()) {
+      next();
+      return;
+    }
+    rateLimited();
   });
+
+  /**
+   * A batch carrying stroke points pays for them on top of the event's own token, so moving a
+   * big drawing is paced like drawing it was. False (and an error) when the bucket is short.
+   */
+  const payForPoints = (elements: ElementInput[]): boolean => {
+    const points = elements.reduce((sum, e) => sum + pointCountOf(e), 0);
+    const extra = Math.floor(points / LIMITS.pointsPerToken);
+    if (extra === 0 || bucket.take(extra)) return true;
+    rateLimited();
+    return false;
+  };
 
   // A transport-level error must not surface as an unhandled 'error' event.
   socket.on('error', (err) => console.error('Socket error:', err));
@@ -160,9 +185,10 @@ export function registerSocketHandlers(
   socket.on(
     CLIENT_EVENTS.elementAdd,
     guarded(elementAddPayload, (payload, boardId) => {
-      const shape = unwrap(rooms.addElement(boardId, socket.id, payload));
-      if (!shape) return;
-      socket.to(channel(boardId)).emit(SERVER_EVENTS.elementAdded, shape);
+      if (!payForPoints([payload])) return;
+      const element = unwrap(rooms.addElement(boardId, socket.id, payload));
+      if (!element) return;
+      socket.to(channel(boardId)).emit(SERVER_EVENTS.elementAdded, element);
     }),
   );
 
@@ -171,6 +197,52 @@ export function registerSocketHandlers(
     guarded(elementDeletePayload, (payload, boardId) => {
       if (!unwrap(rooms.deleteElement(boardId, socket.id, payload.id))) return;
       socket.to(channel(boardId)).emit(SERVER_EVENTS.elementDeleted, { id: payload.id });
+    }),
+  );
+
+  socket.on(
+    CLIENT_EVENTS.elementsAdd,
+    guarded(elementsAddPayload, ({ elements }, boardId) => {
+      if (!payForPoints(elements)) return;
+      const result = unwrap(rooms.addElements(boardId, socket.id, elements));
+      if (!result) return;
+      if (result.added.length > 0) {
+        socket.to(channel(boardId)).emit(SERVER_EVENTS.elementsAdded, { elements: result.added });
+      }
+      if (result.error) sendError(result.error.code, result.error.message);
+    }),
+  );
+
+  socket.on(
+    CLIENT_EVENTS.elementsUpdate,
+    guarded(elementsUpdatePayload, ({ elements }, boardId) => {
+      if (!payForPoints(elements)) return;
+      const result = unwrap(rooms.updateElements(boardId, socket.id, elements));
+      if (!result) return;
+      if (result.updated.length > 0) {
+        socket
+          .to(channel(boardId))
+          .emit(SERVER_EVENTS.elementsUpdated, { elements: result.updated });
+      }
+      if (result.error) sendError(result.error.code, result.error.message);
+    }),
+  );
+
+  socket.on(
+    CLIENT_EVENTS.elementsDelete,
+    guarded(elementsDeletePayload, ({ ids }, boardId) => {
+      const removed = unwrap(rooms.deleteElements(boardId, socket.id, ids));
+      if (!removed || removed.length === 0) return;
+      socket.to(channel(boardId)).emit(SERVER_EVENTS.elementsDeleted, { ids: removed });
+    }),
+  );
+
+  socket.on(
+    CLIENT_EVENTS.elementsReorder,
+    guarded(elementsReorderPayload, ({ ids, to }, boardId) => {
+      const moved = unwrap(rooms.reorderElements(boardId, socket.id, ids, to));
+      if (!moved || moved.length === 0) return;
+      socket.to(channel(boardId)).emit(SERVER_EVENTS.elementsReordered, { ids: moved, to });
     }),
   );
 

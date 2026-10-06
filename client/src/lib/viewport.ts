@@ -1,8 +1,10 @@
 import type { Insets, Size } from './view.ts';
 
 /** Same breakpoint as the compact (bottom toolbar) layout in index.css. */
+export const COMPACT_QUERY = '(max-width: 1099px)';
+
 export function isCompactLayout(): boolean {
-  return window.matchMedia('(max-width: 1099px)').matches;
+  return window.matchMedia(COMPACT_QUERY).matches;
 }
 
 export function viewportSize(): Size {

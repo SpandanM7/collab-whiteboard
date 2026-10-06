@@ -137,7 +137,7 @@ test('strokes land under the pointer, including the far right and bottom', async
   expect(inked).toEqual(spots.map(() => true));
 });
 
-test('the compact layout opens the participants list and the width slider', async ({ page }) => {
+test('the compact layout opens the participants list and the style sheet', async ({ page }) => {
   await open(page);
   const chip = page.locator('.participants-chip');
   test.skip(!(await chip.isVisible()), 'desktop layout shows both inline');
@@ -151,8 +151,10 @@ test('the compact layout opens the participants list and the width slider', asyn
   expect(list.x + list.width).toBeLessThanOrEqual(page.viewportSize()!.width);
   await chip.click();
 
+  // Color and width live in the Style sheet, which the pen opens from the toolbar.
   await expect(page.getByRole('slider', { name: 'Stroke width' })).toBeHidden();
-  await page.locator('.width-toggle').click();
+  await page.getByRole('button', { name: 'Style' }).click();
+  await expect(page.getByRole('group', { name: 'Stroke color' })).toBeVisible();
   const slider = page.getByRole('slider', { name: 'Stroke width' });
   await expect(slider).toBeVisible();
   const box = (await slider.boundingBox())!;
