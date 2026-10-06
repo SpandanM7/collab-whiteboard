@@ -593,7 +593,6 @@ input.participant-name:focus {
 
 /* Desktop: the compact-only controls stay out of the way. */
 .toolbar .icon,
-.toolbar .width-toggle,
 .toolbar .style-toggle,
 .style-panel-close,
 .toolbar .color .label,
@@ -690,43 +689,10 @@ input.participant-name:focus {
     display: block;
   }
 
-  .toolbar input[type='color'] {
-    /* Same height as the icons beside it, so the labels line up. */
-    width: 26px;
-    height: 22px;
-  }
-
-  .width-dot-box {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 24px;
-    height: 24px;
-  }
-
-  .width-dot {
-    max-width: 24px;
-    max-height: 24px;
-    background: currentColor;
-    border-radius: 50%;
-  }
-
+  /* No room for color and width here: they are in the Style sheet. */
+  .toolbar .color,
   .toolbar .width {
     display: none;
-  }
-
-  .toolbar.width-open .width {
-    position: absolute;
-    bottom: calc(100% + 8px);
-    left: calc(var(--safe-left) + 12px);
-    right: calc(var(--safe-right) + 12px);
-    display: flex;
-    gap: 12px;
-    padding: 4px 16px;
-    background: #fff;
-    border: 1px solid #e5e4e7;
-    border-radius: 12px;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.14);
   }
 
   .shapes-popover {
@@ -746,16 +712,6 @@ input.participant-name:focus {
   .toolbar .shapes-popover button {
     min-width: 0;
     max-width: none;
-  }
-
-  .toolbar .width input {
-    flex: 1;
-    min-width: 0;
-  }
-
-  .toolbar .width span {
-    min-width: 5ch;
-    text-align: right;
   }
 
   .connection {
@@ -842,9 +798,8 @@ input.participant-name:focus {
   }
 }
 
-/* The width toggle only exists in the compact layout. */
+/* The Style button only exists in the compact layout. */
 @media (max-width: 1099px) {
-  .toolbar .width-toggle,
   .toolbar .style-toggle {
     display: flex;
   }
@@ -1108,19 +1063,19 @@ input.participant-name:focus {
   background: none;
 }
 
-.style-panel .opacity {
+.style-panel .range-row {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.style-panel .opacity input {
+.style-panel .range-row input {
   flex: 1;
   min-width: 0;
   accent-color: #1a1a1a;
 }
 
-.style-panel .opacity span {
+.style-panel .range-row span {
   min-width: 4ch;
   font-variant-numeric: tabular-nums;
   text-align: right;
@@ -1166,5 +1121,462 @@ input.participant-name:focus {
 
   .style-panel-close {
     display: grid;
+  }
+}
+
+/* ---- Select and text tools ---- */
+
+.whiteboard.select {
+  cursor: default;
+}
+
+.whiteboard.text {
+  cursor: text;
+}
+
+/* Tools that only fit the wide toolbar (Hand moves into the More menu on small screens). */
+.more-menu .compact-only {
+  display: none;
+}
+
+/* The More menu: export, shortcuts and clearing the board. */
+.more-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 220px;
+  padding: 6px;
+  background: #fff;
+  border: 1px solid #e5e4e7;
+  border-radius: 12px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.14);
+}
+
+.toolbar .more-menu button {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 0;
+  max-width: none;
+  padding: 8px 10px;
+  font-size: 14px;
+  text-align: left;
+  background: transparent;
+  border-radius: 8px;
+}
+
+.toolbar .more-menu button:hover:not(:disabled),
+.toolbar .more-menu button[aria-current='true'] {
+  background: #f4f3ec;
+}
+
+.toolbar .more-menu .icon {
+  display: block;
+  flex: none;
+}
+
+.toolbar .more-menu button.danger {
+  color: #b42318;
+}
+
+.more-menu hr {
+  width: 100%;
+  margin: 4px 0;
+  border: 0;
+  border-top: 1px solid #e5e4e7;
+}
+
+/* Undo and redo. */
+.history {
+  position: fixed;
+  left: calc(var(--safe-left) + 16px);
+  bottom: calc(var(--safe-bottom) + 16px);
+  z-index: 6;
+  display: flex;
+  gap: 2px;
+  padding: 4px;
+  background: #fff;
+  border: 1px solid #e5e4e7;
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  user-select: none;
+}
+
+.history button,
+.selection-actions button {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.history button:hover:not(:disabled),
+.selection-actions button:hover {
+  background: #f4f3ec;
+}
+
+.history button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+/* Desktop toasts sit above the undo buttons. */
+.toast-region {
+  bottom: calc(var(--safe-bottom) + 72px);
+}
+
+.toast.info {
+  color: #1a1a1a;
+  border-color: #e5e4e7;
+}
+
+/* Actions for the selection, floating above it. */
+.selection-actions {
+  position: fixed;
+  z-index: 8;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  background: #fff;
+  border: 1px solid #e5e4e7;
+  border-radius: 12px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.16);
+  transform: translateX(-50%);
+  user-select: none;
+  animation: fade-in 0.12s both;
+}
+
+.selection-actions button:last-child {
+  color: #b42318;
+}
+
+.selection-actions-divider {
+  width: 1px;
+  height: 22px;
+  margin: 0 2px;
+  background: #e5e4e7;
+}
+
+/* Text being typed: laid exactly over where the canvas will draw it. */
+.text-editor {
+  position: fixed;
+  z-index: 4;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  white-space: pre;
+  resize: none;
+  background: transparent;
+  border: 0;
+  border-radius: 2px;
+  outline: 1px dashed #1c7ed6;
+  outline-offset: 4px;
+  caret-color: #1c7ed6;
+}
+
+.text-editor::placeholder {
+  color: #9a9a9a;
+}
+
+.segmented-text {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+/* ---- Dialogs: export and shortcuts ---- */
+
+.dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.dialog-header h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.dialog-close {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  font-size: 22px;
+  line-height: 1;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.dialog-close:hover {
+  background: #f4f3ec;
+}
+
+.dialog-actions .primary {
+  color: #fff;
+  background: #1a1a1a;
+}
+
+.dialog-actions button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.export-dialog {
+  width: min(480px, calc(100vw - 32px));
+  max-width: none;
+}
+
+.export-preview {
+  display: grid;
+  place-items: center;
+  height: min(260px, 36dvh);
+  margin-bottom: 14px;
+  overflow: hidden;
+  background: #f8f8f6;
+  border: 1px solid #e5e4e7;
+  border-radius: 10px;
+}
+
+/* Transparent backgrounds show through a checkerboard, as in image editors. */
+.export-preview.checker {
+  background-color: #fff;
+  background-image:
+    linear-gradient(45deg, #ecebe6 25%, transparent 25%),
+    linear-gradient(-45deg, #ecebe6 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #ecebe6 75%),
+    linear-gradient(-45deg, transparent 75%, #ecebe6 75%);
+  background-position:
+    0 0,
+    0 8px,
+    8px -8px,
+    -8px 0;
+  background-size: 16px 16px;
+}
+
+.export-preview img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.export-preview p {
+  margin: 0;
+  padding: 16px;
+  color: #666;
+  text-align: center;
+}
+
+.export-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 16px;
+  margin-bottom: 16px;
+}
+
+.export-options fieldset {
+  flex: 1 1 180px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.export-options legend {
+  margin-bottom: 6px;
+  padding: 0;
+  font-size: 12px;
+  font-weight: 500;
+  color: #666;
+}
+
+.export-options .segmented button {
+  height: 34px;
+  font: inherit;
+  font-size: 13px;
+}
+
+.export-size {
+  flex-basis: 100%;
+  margin: 0;
+  color: #666;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.shortcuts-dialog {
+  width: min(720px, calc(100vw - 32px));
+  max-width: none;
+  max-height: min(640px, calc(100dvh - 32px));
+}
+
+.shortcuts-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 8px 24px;
+}
+
+.shortcuts-grid h3 {
+  margin: 8px 0 6px;
+  font-size: 13px;
+  color: #666;
+}
+
+.shortcuts-grid dl {
+  margin: 0;
+}
+
+.shortcut-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 5px 0;
+  border-bottom: 1px solid #f0efea;
+}
+
+.shortcut-row dt {
+  color: #333;
+}
+
+.shortcut-row dd {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+  margin: 0;
+}
+
+kbd {
+  padding: 2px 6px;
+  font:
+    12px ui-monospace,
+    'Cascadia Mono',
+    Menlo,
+    Consolas,
+    monospace;
+  white-space: nowrap;
+  background: #f4f3ec;
+  border: 1px solid #e0dfd8;
+  border-bottom-width: 2px;
+  border-radius: 6px;
+}
+
+@media (pointer: coarse) {
+  .history button,
+  .selection-actions button {
+    width: 44px;
+    height: 44px;
+  }
+
+  .export-options .segmented button,
+  .dialog-close {
+    min-height: 44px;
+  }
+}
+
+@media (max-width: 1099px) {
+  .toolbar .wide-only {
+    display: none;
+  }
+
+  .more-menu .compact-only {
+    display: block;
+  }
+
+  /* Opens upward from the bottom toolbar, at the right. */
+  .more-menu {
+    top: auto;
+    right: calc(var(--safe-right) + 12px);
+    bottom: calc(100% + 8px);
+    min-width: 230px;
+  }
+
+  .toolbar .more-menu button {
+    flex-direction: row;
+    justify-content: flex-start;
+    min-height: 44px;
+    font-size: 15px;
+  }
+
+  /* Undo and redo: a column at the left edge, mirroring the zoom controls on the right. */
+  .history {
+    top: 50%;
+    bottom: auto;
+    left: calc(var(--safe-left) + 10px);
+    flex-direction: column;
+    transform: translateY(-50%);
+  }
+
+  .history button {
+    width: 44px;
+    height: 44px;
+  }
+
+  .toast-region {
+    bottom: calc(var(--toolbar-h) + var(--safe-bottom) + 12px);
+  }
+
+  .shortcuts-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Phones: the export dialog is a bottom sheet, easy to reach with a thumb. */
+@media (max-width: 600px) {
+  .export-dialog,
+  .shortcuts-dialog {
+    width: 100vw;
+    max-width: 100vw;
+    margin: auto 0 0;
+    padding-bottom: calc(var(--safe-bottom) + 20px);
+    border-radius: 16px 16px 0 0;
+  }
+
+  .export-dialog .dialog-actions {
+    flex-wrap: wrap;
+  }
+
+  .export-dialog .dialog-actions button {
+    flex: 1 1 auto;
+    min-height: 44px;
+  }
+}
+
+.dialog-close:focus-visible,
+.dialog-actions button:focus-visible {
+  outline: 2px solid #1c7ed6;
+  outline-offset: 1px;
+}
+
+/* Short phones: a smaller preview, and the actions always in reach at the bottom. */
+@media (max-width: 600px) {
+  .export-preview {
+    height: min(200px, 28dvh);
+  }
+
+  .export-dialog .dialog-actions {
+    position: sticky;
+    bottom: calc(-1 * (var(--safe-bottom) + 20px));
+    margin: 0 -20px calc(-1 * (var(--safe-bottom) + 20px));
+    padding: 12px 20px calc(var(--safe-bottom) + 20px);
+    background: #fff;
+    border-top: 1px solid #f0efea;
   }
 }

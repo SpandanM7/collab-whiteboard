@@ -1,25 +1,50 @@
-import type { ReactNode } from 'react';
-import { ARROWHEADS, isClosedShapeType } from '@whiteboard/shared';
-import type { Arrowhead, FillStyle, LineRoute, ShapeType, StrokeStyle } from '@whiteboard/shared';
-import { FILL_SWATCHES, STROKE_SWATCHES, hasCorners } from '../lib/toolStyle.ts';
+import type { CSSProperties, ReactNode } from 'react';
+import { ARROWHEADS, TEXT_FONTS } from '@whiteboard/shared';
+import type {
+  Arrowhead,
+  ElementType,
+  FillStyle,
+  LineRoute,
+  StrokeStyle,
+  TextAlign,
+  TextFont,
+} from '@whiteboard/shared';
+import { styleSections } from '../lib/stylePatch.ts';
+import { FONT_SIZES, FONT_STACKS } from '../lib/textLayout.ts';
+import { FILL_SWATCHES, MAX_WIDTH, MIN_WIDTH, STROKE_SWATCHES } from '../lib/toolStyle.ts';
 import type { ToolStyle } from '../lib/toolStyle.ts';
 import { Icon } from './Icon.tsx';
+import { AlignCenterIcon, AlignLeftIcon, AlignRightIcon, CloseIcon } from './icons.tsx';
 import { headIcon } from './shapeIcons.tsx';
 
 type Props = {
-  /** The shape tool in use; the panel only shows options that apply to it. */
-  tool: ShapeType;
+  /**
+   * What is being styled: the kind of element the tool makes, or the kinds in the selection. The
+   * panel only shows options that apply to at least one of them.
+   */
+  types: readonly ElementType[];
+  /** "Style" for a tool; "Selection" or "3 selected" for a selection. */
+  title: string;
   style: ToolStyle;
   onChange: (change: Partial<ToolStyle>) => void;
   /** Compact layout: the panel is a sheet that is shown only while open. */
   open: boolean;
   onClose: () => void;
+  /** Show the line width here (the compact toolbar has no room for it). */
+  withWidth: boolean;
 };
 
-type Option<T> = { value: T; label: string; icon: ReactNode };
+/** An option shows an icon, or a short text sample (fonts, sizes). */
+type Option<T> = {
+  value: T;
+  label: string;
+  icon?: ReactNode;
+  text?: string;
+  style?: CSSProperties;
+};
 
-/** A row of mutually exclusive icon buttons. */
-function Segmented<T extends string | boolean>({
+/** A row of mutually exclusive buttons. */
+function Segmented<T extends string | boolean | number>({
   label,
   options,
   value,
@@ -42,7 +67,13 @@ function Segmented<T extends string | boolean>({
           title={option.label}
           onClick={() => onChange(option.value)}
         >
-          <Icon size={18}>{option.icon}</Icon>
+          {option.text !== undefined ? (
+            <span className="segmented-text" style={option.style}>
+              {option.text}
+            </span>
+          ) : (
+            <Icon size={18}>{option.icon}</Icon>
+          )}
         </button>
       ))}
     </div>
@@ -163,36 +194,113 @@ const headOptions = (end: 'start' | 'end'): Option<Arrowhead>[] =>
 const START_HEADS = headOptions('start');
 const END_HEADS = headOptions('end');
 
-/** Options for new shapes. A side panel on desktop; a sheet above the toolbar on small screens. */
-export function StylePanel({ tool, style, onChange, open, onClose }: Props) {
-  const closed = isClosedShapeType(tool);
+const FONT_NAMES: Record<TextFont, string> = {
+  sans: 'Sans-serif',
+  serif: 'Serif',
+  mono: 'Monospace',
+  hand: 'Handwritten',
+};
+
+const FONT_OPTIONS: Option<TextFont>[] = TEXT_FONTS.map((font) => ({
+  value: font,
+  label: FONT_NAMES[font],
+  text: 'Aa',
+  style: { fontFamily: FONT_STACKS[font] },
+}));
+
+const SIZE_OPTIONS: Option<number>[] = FONT_SIZES.map((size) => ({
+  value: size.value,
+  label: `${size.name} text`,
+  text: size.label,
+}));
+
+const ALIGN_OPTIONS: Option<TextAlign>[] = [
+  { value: 'left', label: 'Align left', icon: AlignLeftIcon },
+  { value: 'center', label: 'Align center', icon: AlignCenterIcon },
+  { value: 'right', label: 'Align right', icon: AlignRightIcon },
+];
+
+/**
+ * Options for new shapes and text, or for the selected elements. A side panel on desktop; a sheet
+ * above the toolbar on small screens.
+ */
+export function StylePanel({ types, title, style, onChange, open, onClose, withWidth }: Props) {
+  const sections = styleSections(types);
+  const textOnly = types.length > 0 && types.every((t) => t === 'text');
   return (
-    <div className={`style-panel${open ? ' open' : ''}`} role="group" aria-label="Shape style">
+    <div className={`style-panel${open ? ' open' : ''}`} role="group" aria-label="Style">
       <div className="style-panel-header">
-        <span>Style</span>
+        <span>{title}</span>
         <button
           type="button"
           className="style-panel-close"
           aria-label="Close style"
           onClick={onClose}
         >
-          <Icon size={18}>
-            <path d="M6 6l12 12M18 6 6 18" />
-          </Icon>
+          <Icon size={18}>{CloseIcon}</Icon>
         </button>
       </div>
 
       <section>
-        <h3>Stroke</h3>
+        <h3>{textOnly ? 'Color' : 'Stroke'}</h3>
         <Swatches
-          label="Stroke color"
+          label={textOnly ? 'Text color' : 'Stroke color'}
           colors={STROKE_SWATCHES}
           value={style.color}
           onChange={(color) => color && onChange({ color })}
         />
       </section>
 
-      {closed && (
+      {withWidth && sections.width && (
+        <section>
+          <h3>Width</h3>
+          <label className="range-row">
+            <input
+              type="range"
+              min={MIN_WIDTH}
+              max={MAX_WIDTH}
+              value={style.width}
+              aria-label="Stroke width"
+              onChange={(e) => onChange({ width: Number(e.target.value) })}
+            />
+            <span>{style.width}px</span>
+          </label>
+        </section>
+      )}
+
+      {sections.text && (
+        <>
+          <section>
+            <h3>Font</h3>
+            <Segmented
+              label="Font"
+              options={FONT_OPTIONS}
+              value={style.font}
+              onChange={(font) => onChange({ font })}
+            />
+          </section>
+          <section>
+            <h3>Text size</h3>
+            <Segmented
+              label="Text size"
+              options={SIZE_OPTIONS}
+              value={style.fontSize}
+              onChange={(fontSize) => onChange({ fontSize })}
+            />
+          </section>
+          <section>
+            <h3>Alignment</h3>
+            <Segmented
+              label="Alignment"
+              options={ALIGN_OPTIONS}
+              value={style.align}
+              onChange={(align) => onChange({ align })}
+            />
+          </section>
+        </>
+      )}
+
+      {sections.fill && (
         <section>
           <h3>Fill</h3>
           <Swatches
@@ -215,17 +323,19 @@ export function StylePanel({ tool, style, onChange, open, onClose }: Props) {
         </section>
       )}
 
-      <section>
-        <h3>Outline</h3>
-        <Segmented
-          label="Outline style"
-          options={STROKE_STYLE_OPTIONS}
-          value={style.strokeStyle}
-          onChange={(strokeStyle) => onChange({ strokeStyle })}
-        />
-      </section>
+      {sections.outline && (
+        <section>
+          <h3>Outline</h3>
+          <Segmented
+            label="Outline style"
+            options={STROKE_STYLE_OPTIONS}
+            value={style.strokeStyle}
+            onChange={(strokeStyle) => onChange({ strokeStyle })}
+          />
+        </section>
+      )}
 
-      {hasCorners(tool) && (
+      {sections.corners && (
         <section>
           <h3>Corners</h3>
           <Segmented
@@ -237,7 +347,7 @@ export function StylePanel({ tool, style, onChange, open, onClose }: Props) {
         </section>
       )}
 
-      {!closed && (
+      {sections.path && (
         <section>
           <h3>Path</h3>
           <Segmented
@@ -249,7 +359,7 @@ export function StylePanel({ tool, style, onChange, open, onClose }: Props) {
         </section>
       )}
 
-      {tool === 'arrow' && (
+      {sections.heads && (
         <section>
           <h3>Arrowheads</h3>
           <Segmented
@@ -267,21 +377,23 @@ export function StylePanel({ tool, style, onChange, open, onClose }: Props) {
         </section>
       )}
 
-      <section>
-        <h3>Opacity</h3>
-        <label className="opacity">
-          <input
-            type="range"
-            min={10}
-            max={100}
-            step={10}
-            value={Math.round(style.opacity * 100)}
-            aria-label="Opacity"
-            onChange={(e) => onChange({ opacity: Number(e.target.value) / 100 })}
-          />
-          <span>{Math.round(style.opacity * 100)}%</span>
-        </label>
-      </section>
+      {sections.opacity && (
+        <section>
+          <h3>Opacity</h3>
+          <label className="range-row">
+            <input
+              type="range"
+              min={10}
+              max={100}
+              step={10}
+              value={Math.round(style.opacity * 100)}
+              aria-label="Opacity"
+              onChange={(e) => onChange({ opacity: Number(e.target.value) / 100 })}
+            />
+            <span>{Math.round(style.opacity * 100)}%</span>
+          </label>
+        </section>
+      )}
     </div>
   );
 }

@@ -1,10 +1,21 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { ShapeType } from '@whiteboard/shared';
+import { useDismiss } from '../hooks/useDismiss.ts';
+import { modKey } from '../lib/shortcuts.ts';
 import { MAX_WIDTH, MIN_WIDTH } from '../lib/toolStyle.ts';
 import { isShapeTool } from '../types.ts';
 import type { Tool } from '../types.ts';
 import { Icon } from './Icon.tsx';
+import {
+  ExportIcon,
+  HandIcon,
+  KeyboardIcon,
+  MoreIcon,
+  SelectIcon,
+  TextIcon,
+  TrashIcon,
+} from './icons.tsx';
 import { SHAPE_TOOLS } from './shapeIcons.tsx';
 
 type Props = {
@@ -14,9 +25,15 @@ type Props = {
   onToolChange: (tool: Tool) => void;
   onColorChange: (color: string) => void;
   onWidthChange: (width: number) => void;
+  /** Whether the style panel has anything to show (a shape or text tool, or a selection). */
+  hasStyle: boolean;
   /** Compact layout only: whether the style panel is open, and the button that toggles it. */
   styleOpen: boolean;
   onStyleToggle: () => void;
+  /** Whether the line width applies (it does not to text). Wide layout only. */
+  showWidth: boolean;
+  onExport: () => void;
+  onShortcuts: () => void;
   onClear: () => void;
   /** Clearing has to reach the server, so it is unavailable while offline. */
   clearDisabled?: boolean;
@@ -31,41 +48,38 @@ export function Toolbar({
   onToolChange,
   onColorChange,
   onWidthChange,
+  hasStyle,
   styleOpen,
   onStyleToggle,
+  showWidth,
+  onExport,
+  onShortcuts,
   onClear,
   clearDisabled,
 }: Props) {
-  // Compact layout only: the width slider lives in a popover above the bar.
-  const [widthOpen, setWidthOpen] = useState(false);
   // All the shapes share one toolbar button, so the bar stays the same width.
   const [shapesOpen, setShapesOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
   const [lastShape, setLastShape] = useState<ShapeType>('rect');
   const shapeActive = isShapeTool(tool);
   if (isShapeTool(tool) && tool !== lastShape) setLastShape(tool);
 
-  // Anything outside the popover (the canvas, another tool) or Escape closes it.
-  useEffect(() => {
-    if (!shapesOpen) return;
-    const onPointerDown = (e: PointerEvent) => {
-      const target = e.target instanceof Element ? e.target : null;
-      if (!target?.closest('.shapes-popover, .shapes-toggle')) setShapesOpen(false);
-    };
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setShapesOpen(false);
-    };
-    document.addEventListener('pointerdown', onPointerDown);
-    document.addEventListener('keydown', onKeyDown);
-    return () => {
-      document.removeEventListener('pointerdown', onPointerDown);
-      document.removeEventListener('keydown', onKeyDown);
-    };
-  }, [shapesOpen]);
+  // Anything outside a popover (the canvas, another tool) or Escape closes it.
+  useDismiss(
+    shapesOpen,
+    '.shapes-popover, .shapes-toggle',
+    useCallback(() => setShapesOpen(false), []),
+  );
+  useDismiss(
+    moreOpen,
+    '.more-menu, .more-toggle',
+    useCallback(() => setMoreOpen(false), []),
+  );
 
-  const toolButton = (value: Tool, label: string, key: string, icon: ReactNode) => (
+  const toolButton = (value: Tool, label: string, key: string, icon: ReactNode, className = '') => (
     <button
       type="button"
-      className={tool === value ? 'active' : ''}
+      className={`${className}${tool === value ? ' active' : ''}`.trim()}
       aria-pressed={tool === value}
       title={withKey(label, key)}
       onClick={() => onToolChange(value)}
@@ -75,12 +89,24 @@ export function Toolbar({
     </button>
   );
 
-  return (
-    <div
-      className={`toolbar${widthOpen ? ' width-open' : ''}`}
-      role="toolbar"
-      aria-label="Drawing tools"
+  const menuItem = (label: string, icon: ReactNode, onClick: () => void, extra = {}) => (
+    <button
+      type="button"
+      role="menuitem"
+      onClick={() => {
+        setMoreOpen(false);
+        onClick();
+      }}
+      {...extra}
     >
+      <Icon size={20}>{icon}</Icon>
+      <span>{label}</span>
+    </button>
+  );
+
+  return (
+    <div className="toolbar" role="toolbar" aria-label="Drawing tools">
+      {toolButton('select', 'Select', 'V', SelectIcon)}
       {toolButton(
         'pen',
         'Pen',
@@ -100,17 +126,7 @@ export function Toolbar({
           <path d="m5 11 9 9" />
         </>,
       )}
-      {toolButton(
-        'hand',
-        'Hand',
-        'H',
-        <>
-          <path d="M18 11V6a2 2 0 0 0-4 0" />
-          <path d="M14 10V4a2 2 0 0 0-4 0v2" />
-          <path d="M10 10.5V6a2 2 0 0 0-4 0v8" />
-          <path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.9-5.9-2.4L3.4 16a2 2 0 0 1 3.2-2.4L8 15" />
-        </>,
-      )}
+      {toolButton('hand', 'Hand', 'H', HandIcon, 'wide-only')}
       <button
         type="button"
         className={`shapes-toggle${shapeActive ? ' active' : ''}`}
@@ -125,7 +141,8 @@ export function Toolbar({
         <Icon>{SHAPE_TOOLS.find((shape) => shape.tool === lastShape)?.icon}</Icon>
         <span className="label">Shapes</span>
       </button>
-      <label className="color">
+      {toolButton('text', 'Text', 'T', TextIcon)}
+      <label className="color" title="Color">
         <input
           type="color"
           value={color}
@@ -134,33 +151,21 @@ export function Toolbar({
         />
         <span className="label">Color</span>
       </label>
-      <button
-        type="button"
-        className="width-toggle"
-        aria-expanded={widthOpen}
-        aria-label={`Stroke width, ${width}px`}
-        onClick={() => setWidthOpen((open) => !open)}
-      >
-        <span className="width-dot-box" aria-hidden="true">
-          <span
-            className="width-dot"
-            style={{ width: Math.max(4, width), height: Math.max(4, width) }}
+      {/* Wide layout only; small screens set color and width in the Style sheet. */}
+      {showWidth && (
+        <label className="width">
+          <input
+            type="range"
+            min={MIN_WIDTH}
+            max={MAX_WIDTH}
+            value={width}
+            aria-label="Stroke width"
+            onChange={(e) => onWidthChange(Number(e.target.value))}
           />
-        </span>
-        <span className="label">Size</span>
-      </button>
-      <label className="width">
-        <input
-          type="range"
-          min={MIN_WIDTH}
-          max={MAX_WIDTH}
-          value={width}
-          aria-label="Stroke width"
-          onChange={(e) => onWidthChange(Number(e.target.value))}
-        />
-        <span>{width}px</span>
-      </label>
-      {shapeActive && (
+          <span>{width}px</span>
+        </label>
+      )}
+      {hasStyle && (
         <button
           type="button"
           className={`style-toggle${styleOpen ? ' active' : ''}`}
@@ -177,13 +182,16 @@ export function Toolbar({
           <span className="label">Style</span>
         </button>
       )}
-      <button type="button" className="clear" disabled={clearDisabled} onClick={onClear}>
-        <Icon>
-          <path d="M3 6h18" />
-          <path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2" />
-          <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-        </Icon>
-        <span className="label">Clear</span>
+      <button
+        type="button"
+        className={`more-toggle${moreOpen ? ' active' : ''}`}
+        aria-expanded={moreOpen}
+        aria-haspopup="menu"
+        title="More"
+        onClick={() => setMoreOpen((open) => !open)}
+      >
+        <Icon>{MoreIcon}</Icon>
+        <span className="label">More</span>
       </button>
       {shapesOpen && (
         <div className="shapes-popover" role="group" aria-label="Shapes">
@@ -204,6 +212,25 @@ export function Toolbar({
               <span className="label">{shape.label}</span>
             </button>
           ))}
+        </div>
+      )}
+      {moreOpen && (
+        <div className="more-menu" role="menu" aria-label="More">
+          <div className="compact-only">
+            {menuItem('Hand (pan)', HandIcon, () => onToolChange('hand'), {
+              'aria-current': tool === 'hand' ? 'true' : undefined,
+            })}
+          </div>
+          {menuItem('Export image…', ExportIcon, onExport, {
+            title: `Export image (${modKey()}+Shift+E)`,
+          })}
+          {menuItem('Keyboard shortcuts', KeyboardIcon, onShortcuts, { title: 'Shortcuts (?)' })}
+          <hr />
+          {menuItem('Clear board…', TrashIcon, onClear, {
+            className: 'danger',
+            disabled: clearDisabled,
+            title: clearDisabled ? 'Clearing needs a connection' : undefined,
+          })}
         </div>
       )}
     </div>
