@@ -1,7 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import { CLIENT_EVENTS, LIMITS } from '@whiteboard/shared';
 import type { BoardElement, Shape, Stroke } from '@whiteboard/shared';
-import { PendingSync, shapeJob, strokeJob } from './pendingSync.ts';
+import {
+  PendingSync,
+  addJob,
+  batchMessages,
+  messageCost,
+  reorderList,
+  strokeJob,
+  takeFromOutbox,
+  updateJob,
+} from './pendingSync.ts';
+import type { OutboxItem, Outgoing } from './pendingSync.ts';
 
 const stroke = (id: string, pointCount = 3, authorId = 'someone'): Stroke => ({
   id,
@@ -211,9 +221,9 @@ describe('PendingSync bookkeeping', () => {
 });
 
 describe('shapes', () => {
-  it('shapeJob is a single element:add without the author or timestamp', () => {
-    const job = shapeJob(shape('r1', 'ellipse'));
-    expect(job.kind).toBe('shape');
+  it('addJob is a single element:add without the author or timestamp', () => {
+    const job = addJob(shape('r1', 'ellipse'));
+    expect(job.kind).toBe('add');
     expect(job.messages).toEqual([
       {
         event: CLIENT_EVENTS.elementAdd,
@@ -230,12 +240,12 @@ describe('shapes', () => {
     ]);
   });
 
-  it('shapeJob for a line carries no fill', () => {
-    const [message] = shapeJob(shape('l1', 'line')).messages;
+  it('addJob for a line carries no fill', () => {
+    const [message] = addJob(shape('l1', 'line')).messages;
     expect(message?.payload).not.toHaveProperty('fill');
   });
 
-  it('shapeJob carries the style options', () => {
+  it('addJob carries the style options', () => {
     const arrow: Shape = {
       ...shape('a1', 'arrow'),
       type: 'arrow',
@@ -244,7 +254,7 @@ describe('shapes', () => {
       startHead: 'dot',
       route: 'elbow',
     };
-    const [message] = shapeJob(arrow).messages;
+    const [message] = addJob(arrow).messages;
     expect(message?.payload).toMatchObject({
       strokeStyle: 'dashed',
       opacity: 0.4,
@@ -255,15 +265,15 @@ describe('shapes', () => {
 
   it('replays a shape the server does not have, on top of the server board', () => {
     const pending = new PendingSync();
-    pending.addShape(shape('mine'));
+    pending.addElement(shape('mine'));
     const result = pending.reconcile([stroke('other')]);
     expect(result.elements.map((e) => e.id)).toEqual(['other', 'mine']);
-    expect(result.jobs.map((j) => j.kind)).toEqual(['shape']);
+    expect(result.jobs.map((j) => j.kind)).toEqual(['add']);
   });
 
   it('does not replay a shape the server already has', () => {
     const pending = new PendingSync();
-    pending.addShape(shape('mine'));
+    pending.addElement(shape('mine'));
     const result = pending.reconcile([shape('mine')]);
     expect(result.jobs).toEqual([]);
     expect(result.elements.map((e) => e.id)).toEqual(['mine']);
@@ -273,14 +283,14 @@ describe('shapes', () => {
   it('keeps drawing order between offline strokes and shapes', () => {
     const pending = new PendingSync();
     pending.addStroke(stroke('s1'), false);
-    pending.addShape(shape('r1'));
+    pending.addElement(shape('r1'));
     pending.addStroke(stroke('s2'), false);
     expect(pending.reconcile([]).elements.map((e) => e.id)).toEqual(['s1', 'r1', 's2']);
   });
 
   it('gives up on a shape when the board is full', () => {
     const pending = new PendingSync();
-    pending.addShape(shape('late'));
+    pending.addElement(shape('late'));
     const full = Array.from({ length: LIMITS.maxElementsPerBoard }, (_, i) => stroke(`s${i}`, 1));
     const result = pending.reconcile(full);
     expect(result.dropped).toBe(1);
@@ -289,15 +299,159 @@ describe('shapes', () => {
 
   it('erasing a pending shape deactivates its job; the server never heard of it', () => {
     const pending = new PendingSync();
-    const job = pending.addShape(shape('r1'));
+    const job = pending.addElement(shape('r1'));
     expect(pending.removeElement('r1')).toEqual({ onServer: false });
     expect(pending.isActive(job)).toBe(false);
   });
 
   it('resolving a shape job clears it', () => {
     const pending = new PendingSync();
-    const job = pending.addShape(shape('r1'));
+    const job = pending.addElement(shape('r1'));
     pending.resolve(job);
     expect(pending.size).toBe(0);
+  });
+});
+
+describe('PendingSync updates', () => {
+  it('replays a change to a server element as an update in place', () => {
+    const pending = new PendingSync();
+    const moved = { ...shape('r1'), start: { x: 50, y: 50 } };
+    pending.update(moved);
+    const result = pending.reconcile([shape('r1'), stroke('s1')]);
+    expect(result.elements.map((e) => e.id)).toEqual(['r1', 's1']);
+    expect(result.elements[0]).toBe(moved);
+    expect(result.jobs.map((j) => j.kind)).toEqual(['update']);
+    expect(events(result.jobs[0].messages)).toEqual([CLIENT_EVENTS.elementsUpdate]);
+  });
+
+  it('drops a change to an element someone else deleted meanwhile', () => {
+    const pending = new PendingSync();
+    pending.update(shape('r1'));
+    const result = pending.reconcile([]);
+    expect(result.elements).toEqual([]);
+    expect(result.jobs).toEqual([]);
+    expect(pending.size).toBe(0);
+  });
+
+  it('drops a change the server already has', () => {
+    const pending = new PendingSync();
+    pending.update(shape('r1'));
+    expect(pending.reconcile([{ ...shape('r1'), authorId: 'x' }]).jobs).toEqual([]);
+  });
+
+  it('sends a still-pending element once, in its latest form', () => {
+    const pending = new PendingSync();
+    const first = pending.addElement(shape('r1'));
+    const moved = { ...shape('r1'), start: { x: 7, y: 7 } };
+    const second = pending.update(moved);
+    expect(pending.isActive(first)).toBe(false);
+    expect(pending.isActive(second)).toBe(true);
+    expect(second.kind).toBe('add');
+    expect(pending.size).toBe(1);
+  });
+
+  it('replaces any partial server copy when a pen stroke changes before it was sent', () => {
+    const pending = new PendingSync();
+    pending.addStroke(stroke('s1'), false);
+    const job = pending.update({ ...stroke('s1'), color: '#ff0000' });
+    expect(job.messages[0].event).toBe(CLIENT_EVENTS.elementDelete);
+  });
+
+  it('resolving a stale job leaves the newer one pending', () => {
+    const pending = new PendingSync();
+    const first = pending.addElement(shape('r1'));
+    pending.update(shape('r1'));
+    pending.resolve(first);
+    expect(pending.size).toBe(1);
+  });
+
+  it('turns an erase that is brought back into an update', () => {
+    const pending = new PendingSync();
+    pending.queueDelete('r1');
+    expect(pending.cancelDelete('r1')).toBe(true);
+    expect(pending.cancelDelete('r1')).toBe(false);
+    expect(pending.update(shape('r1')).kind).toBe('update');
+  });
+});
+
+describe('PendingSync reorders', () => {
+  it('applies offline reorders after the merge and replays them', () => {
+    const pending = new PendingSync();
+    pending.queueReorder(['a'], 'front');
+    const result = pending.reconcile([shape('a'), shape('b')]);
+    expect(result.elements.map((e) => e.id)).toEqual(['b', 'a']);
+    expect(result.jobs.map((j) => j.kind)).toEqual(['reorder']);
+    expect(pending.size).toBe(1);
+    pending.resolve(result.jobs[0]);
+    expect(pending.size).toBe(0);
+  });
+
+  it('forgets a reorder of elements that are gone', () => {
+    const pending = new PendingSync();
+    pending.queueReorder(['gone'], 'back');
+    expect(pending.reconcile([shape('a')]).jobs).toEqual([]);
+    expect(pending.size).toBe(0);
+  });
+
+  it('reorderList keeps the moved elements in their order', () => {
+    const list = ['a', 'b', 'c', 'd'].map((id) => ({ id }));
+    expect(reorderList(list, ['c', 'a'], 'front').map((e) => e.id)).toEqual(['b', 'd', 'a', 'c']);
+    expect(reorderList(list, ['d', 'b'], 'back').map((e) => e.id)).toEqual(['b', 'd', 'a', 'c']);
+  });
+});
+
+describe('batching', () => {
+  const add = (id: string): Outgoing => addJob(shape(id)).messages[0];
+  const del = (id: string): Outgoing => ({ event: CLIENT_EVENTS.elementDelete, payload: { id } });
+
+  it('merges runs of adds and of erases, keeping their order', () => {
+    const batched = batchMessages([add('a'), add('b'), del('x'), del('y'), add('c')]);
+    expect(events(batched)).toEqual([
+      CLIENT_EVENTS.elementsAdd,
+      CLIENT_EVENTS.elementsDelete,
+      CLIENT_EVENTS.elementAdd,
+    ]);
+  });
+
+  it('keeps each batch within the point limit', () => {
+    const big = (id: string): Outgoing =>
+      addJob(stroke(id, LIMITS.maxPointsPerBatch - 10)).messages[0];
+    expect(batchMessages([big('a'), big('b')])).toHaveLength(2);
+  });
+
+  it('never puts two versions of one element in a batch', () => {
+    const update = (x: number): Outgoing =>
+      updateJob({ ...shape('a'), start: { x, y: 0 } }).messages[0];
+    expect(batchMessages([update(1), update(2)])).toHaveLength(2);
+  });
+
+  it('charges points the way the server does', () => {
+    expect(messageCost(add('a'))).toBe(1);
+    const points = LIMITS.pointsPerToken * 2;
+    expect(messageCost(addJob(stroke('s', points)).messages[0])).toBe(3);
+  });
+
+  it('drains the outbox in batches, skipping work that was cancelled', () => {
+    const pending = new PendingSync();
+    const jobs = ['a', 'b', 'c'].map((id) => pending.addElement(shape(id)));
+    pending.removeElement('b');
+    const outbox: OutboxItem[] = jobs.map((job) => ({ job, next: 0 }));
+    const { messages, finished } = takeFromOutbox(outbox, (j) => pending.isActive(j), 5);
+    expect(events(messages)).toEqual([CLIENT_EVENTS.elementsAdd]);
+    const sent = messages[0].payload as { elements: { id: string }[] };
+    expect(sent.elements.map((e) => e.id)).toEqual(['a', 'c']);
+    expect(finished.map((j) => j.id)).toEqual(['a', 'c']);
+    expect(outbox).toEqual([]);
+  });
+
+  it('sends stroke streams message by message within the budget', () => {
+    const pending = new PendingSync();
+    const job = pending.addStroke(stroke('s', LIMITS.maxPointsPerMessage * 3), false);
+    const outbox: OutboxItem[] = [{ job, next: 0 }];
+    const first = takeFromOutbox(outbox, (j) => pending.isActive(j), 2);
+    expect(events(first.messages)).toEqual([CLIENT_EVENTS.strokeStart, CLIENT_EVENTS.strokePoints]);
+    expect(first.finished).toEqual([]);
+    const rest = takeFromOutbox(outbox, (j) => pending.isActive(j), 10);
+    expect(rest.finished).toEqual([job]);
   });
 });
