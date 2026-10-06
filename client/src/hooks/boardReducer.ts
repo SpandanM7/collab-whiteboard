@@ -1,4 +1,5 @@
-import type { BoardElement, Point, Stroke } from '@whiteboard/shared';
+import type { BoardElement, Point, ReorderTarget, Stroke } from '@whiteboard/shared';
+import { reorderList } from '../lib/pendingSync.ts';
 
 /**
  * Board elements as the client sees them. Finished elements (`committed`, strokes and shapes) are
@@ -12,6 +13,9 @@ export type BoardAction =
   | { type: 'reset'; elements: BoardElement[] }
   | { type: 'add-local'; element: BoardElement }
   | { type: 'remote-add'; element: BoardElement }
+  | { type: 'add-many'; elements: BoardElement[] }
+  | { type: 'update'; elements: BoardElement[] }
+  | { type: 'reorder'; ids: string[]; to: ReorderTarget }
   | { type: 'remote-start'; stroke: Stroke }
   | { type: 'remote-points'; id: string; points: Point[] }
   | { type: 'remote-end'; id: string }
@@ -39,6 +43,38 @@ export function boardReducer(state: BoardState, action: BoardAction): BoardState
     case 'remote-add': {
       const known = [...state.committed, ...state.live].some((e) => e.id === action.element.id);
       return known ? state : { ...state, committed: [...state.committed, action.element] };
+    }
+
+    // Finished elements arriving together (someone pasted or undid an erase), or added locally.
+    case 'add-many': {
+      const known = new Set([...state.committed, ...state.live].map((e) => e.id));
+      const fresh = action.elements.filter((e) => !known.has(e.id));
+      return fresh.length === 0 ? state : { ...state, committed: [...state.committed, ...fresh] };
+    }
+
+    // New versions of elements, each keeping its place in the stack. Ids we do not have are
+    // ignored (deleted here first). A stroke still drawing that gets replaced is finished.
+    case 'update': {
+      const next = new Map(action.elements.map((e) => [e.id, e]));
+      let changed = false;
+      const committed = state.committed.map((e) => {
+        const replacement = next.get(e.id);
+        if (!replacement || replacement === e) return e;
+        changed = true;
+        return replacement;
+      });
+      const finished = state.live.filter((s) => next.has(s.id));
+      if (!changed && finished.length === 0) return state;
+      return {
+        committed: [...committed, ...finished.map((s) => next.get(s.id)!)],
+        live: finished.length > 0 ? state.live.filter((s) => !next.has(s.id)) : state.live,
+      };
+    }
+
+    case 'reorder': {
+      const committed = reorderList(state.committed, action.ids, action.to);
+      const same = committed.every((e, i) => e === state.committed[i]);
+      return same ? state : { ...state, committed };
     }
 
     case 'remote-start': {
