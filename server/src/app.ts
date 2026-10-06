@@ -7,8 +7,11 @@ import type { RateLimit } from './rateLimit.ts';
 import { Rooms } from './rooms.ts';
 import { DEFAULT_RATE_LIMIT, registerSocketHandlers } from './socket.ts';
 
-/** Largest accepted socket message. A full 200-point batch is well under 10 KB. */
-const MAX_MESSAGE_BYTES = 64 * 1024;
+/**
+ * Largest accepted socket message. The biggest legitimate one is a single full stroke (5,000
+ * points, coordinates rounded to 0.01) in an element batch: about 170 KB.
+ */
+const MAX_MESSAGE_BYTES = 256 * 1024;
 
 /** How often idle cursors are swept. Well under the TTL so they expire promptly. */
 const CURSOR_SWEEP_INTERVAL_MS = 2_000;
