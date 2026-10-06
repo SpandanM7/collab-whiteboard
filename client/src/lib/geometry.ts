@@ -9,7 +9,9 @@ import type {
   Point,
   Shape,
   Stroke,
+  TextElement,
 } from '@whiteboard/shared';
+import { layoutText } from './textLayout.ts';
 
 function distanceToSegment(p: Point, a: Point, b: Point): number {
   const dx = b.x - a.x;
@@ -371,10 +373,107 @@ export function shapeHit(shape: Shape, p: Point, radius: number): boolean {
   return outlines.some((outline) => distanceToPath(p, outline, true) <= reach);
 }
 
+/** The block a text covers: its top-left corner plus its measured size. */
+export function textBox(text: TextElement): Rect {
+  const { width, height } = layoutText(text);
+  return {
+    left: text.start.x,
+    top: text.start.y,
+    right: text.start.x + width,
+    bottom: text.start.y + height,
+  };
+}
+
+/** Text is hit anywhere in its block (with `radius` of slack), like a filled shape. */
+export function textHit(text: TextElement, p: Point, radius: number): boolean {
+  const box = textBox(text);
+  return (
+    p.x >= box.left - radius &&
+    p.x <= box.right + radius &&
+    p.y >= box.top - radius &&
+    p.y <= box.bottom + radius
+  );
+}
+
 export function elementBounds(element: BoardElement): Rect {
-  return element.type === 'stroke' ? strokeBounds(element) : shapeBounds(element);
+  switch (element.type) {
+    case 'stroke':
+      return strokeBounds(element);
+    case 'text':
+      return textBox(element);
+    default:
+      return shapeBounds(element);
+  }
 }
 
 export function elementHit(element: BoardElement, p: Point, radius: number): boolean {
-  return element.type === 'stroke' ? strokeHit(element, p, radius) : shapeHit(element, p, radius);
+  switch (element.type) {
+    case 'stroke':
+      return strokeHit(element, p, radius);
+    case 'text':
+      return textHit(element, p, radius);
+    default:
+      return shapeHit(element, p, radius);
+  }
+}
+
+/**
+ * True if `p` is inside a closed shape's silhouette, filled or not. Selecting uses it so a
+ * hollow shape can be picked up by its middle, not only by its outline.
+ */
+export function shapeContains(shape: Shape, p: Point): boolean {
+  if (!isClosedShape(shape)) return false;
+  if (shape.type === 'ellipse') return insideEllipse(p, normalizedBox(shape));
+  return insidePolygon(p, closedOutlines(shape)[0]);
+}
+
+/**
+ * The element's geometry without line width or arrow heads: the box a closed shape or text spans,
+ * the path a line follows, the points of a stroke. Selection frames and resizing work on this, so
+ * a resized shape's corners land exactly where they are dragged (and on the grid).
+ */
+export function coreBounds(element: BoardElement): Rect {
+  switch (element.type) {
+    case 'stroke':
+      return boundsOf(element.points, 0);
+    case 'text':
+      return textBox(element);
+    default:
+      return isClosedShape(element) ? normalizedBox(element) : boundsOf(linePath(element), 0);
+  }
+}
+
+/** The smallest box around all of `rects`, or null if there are none. */
+export function unionRects(rects: Iterable<Rect>): Rect | null {
+  let out: Rect | null = null;
+  for (const r of rects) {
+    out = out
+      ? {
+          left: Math.min(out.left, r.left),
+          top: Math.min(out.top, r.top),
+          right: Math.max(out.right, r.right),
+          bottom: Math.max(out.bottom, r.bottom),
+        }
+      : { ...r };
+  }
+  return out;
+}
+
+/** A box from two corners in any order. */
+export function rectFromPoints(a: Point, b: Point): Rect {
+  return {
+    left: Math.min(a.x, b.x),
+    top: Math.min(a.y, b.y),
+    right: Math.max(a.x, b.x),
+    bottom: Math.max(a.y, b.y),
+  };
+}
+
+export function rectContainsPoint(r: Rect, p: Point, slack = 0): boolean {
+  return (
+    p.x >= r.left - slack &&
+    p.x <= r.right + slack &&
+    p.y >= r.top - slack &&
+    p.y <= r.bottom + slack
+  );
 }
