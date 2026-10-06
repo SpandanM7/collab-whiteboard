@@ -93,10 +93,53 @@ export const lineShapeSchema = z.object({
 
 export const shapeSchema = z.discriminatedUnion('type', [closedShapeSchema, lineShapeSchema]);
 
+export const TEXT_FONTS = ['sans', 'serif', 'mono', 'hand'] as const;
+export const TEXT_ALIGNS = ['left', 'center', 'right'] as const;
+
+/**
+ * A block of text. `start` is the top-left corner of the block; lines are split on "\n" and
+ * aligned inside the block, which is as wide as its longest line. Never empty.
+ */
+export const textSchema = z.object({
+  id: idSchema,
+  type: z.literal('text'),
+  authorId: idSchema,
+  color: colorSchema,
+  start: pointSchema,
+  text: z
+    .string()
+    .max(LIMITS.maxTextLength)
+    .refine((t) => t.trim().length > 0, 'Text cannot be empty.'),
+  /** Board units; line height is 1.25 times this. */
+  fontSize: z.number().min(LIMITS.minFontSize).max(LIMITS.maxFontSize),
+  createdAt: z.number(),
+  /** Absent means sans. */
+  font: z.enum(TEXT_FONTS).optional(),
+  /** Absent means left. */
+  align: z.enum(TEXT_ALIGNS).optional(),
+  /** Absent means fully opaque. */
+  opacity: z.number().min(0.1).max(1).optional(),
+});
+
 export const boardElementSchema = z.discriminatedUnion('type', [
   strokeSchema,
   closedShapeSchema,
   lineShapeSchema,
+  textSchema,
+]);
+
+/**
+ * A finished element as a client sends it: everything but `authorId` and `createdAt`, which the
+ * server sets. Strokes sent this way (pasted, duplicated, restored by undo) are complete.
+ */
+const inputOmit = { authorId: true, createdAt: true } as const;
+export const elementInputSchema = z.discriminatedUnion('type', [
+  strokeSchema.omit(inputOmit).extend({
+    points: z.array(pointSchema).min(1).max(LIMITS.maxPointsPerStroke),
+  }),
+  closedShapeSchema.omit(inputOmit),
+  lineShapeSchema.omit(inputOmit),
+  textSchema.omit(inputOmit),
 ]);
 
 export const boardSchema = z.object({
@@ -125,7 +168,12 @@ export type StrokeStyle = (typeof STROKE_STYLES)[number];
 export type FillStyle = (typeof FILL_STYLES)[number];
 export type Arrowhead = (typeof ARROWHEADS)[number];
 export type LineRoute = (typeof LINE_ROUTES)[number];
+export type TextElement = z.infer<typeof textSchema>;
+export type TextFont = (typeof TEXT_FONTS)[number];
+export type TextAlign = (typeof TEXT_ALIGNS)[number];
 export type BoardElement = z.infer<typeof boardElementSchema>;
+export type ElementType = BoardElement['type'];
+export type ElementInput = z.infer<typeof elementInputSchema>;
 export type Board = z.infer<typeof boardSchema>;
 export type Participant = z.infer<typeof participantSchema>;
 
@@ -135,4 +183,20 @@ export function isClosedShapeType(type: string): type is ClosedShapeType {
 
 export function isClosedShape(shape: Shape): shape is ClosedShape {
   return isClosedShapeType(shape.type);
+}
+
+export function isShape(element: BoardElement): element is Shape {
+  return element.type !== 'stroke' && element.type !== 'text';
+}
+
+/** Stroke points an element carries (what counts toward the board's point budget). */
+export function pointCountOf(element: { type: string; points?: unknown[] }): number {
+  return element.type === 'stroke' ? (element.points?.length ?? 0) : 0;
+}
+
+/** The element as it goes over the wire: the server sets the author and the time. */
+export function toElementInput(element: BoardElement): ElementInput {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- dropped from the payload
+  const { authorId, createdAt, ...input } = element;
+  return input;
 }

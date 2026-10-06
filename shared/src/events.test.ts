@@ -6,7 +6,12 @@ import {
   cursorMovePayload,
   cursorMovedPayload,
   elementAddPayload,
+  elementsAddPayload,
+  elementsDeletePayload,
+  elementsReorderPayload,
+  elementsUpdatePayload,
   boardElementSchema,
+  toElementInput,
   participantJoinedPayload,
   participantLeftPayload,
   elementDeletePayload,
@@ -205,7 +210,7 @@ describe('elementAddPayload', () => {
     ['invisible opacity', { opacity: 0 }],
     ['unknown fill style', { fillStyle: 'dots' }],
     ['non-boolean rounded', { rounded: 'yes' }],
-    ['stroke type', { type: 'stroke' }],
+    ['stroke without points', { type: 'stroke' }],
     ['bad fill color', { fill: 'blue' }],
     ['zero width', { width: 0 }],
     ['too wide', { width: LIMITS.maxStrokeWidth + 1 }],
@@ -251,5 +256,120 @@ describe('boardElementSchema', () => {
     expect(
       boardElementSchema.safeParse({ ...arrow, points: undefined, start: undefined }).success,
     ).toBe(false);
+  });
+});
+
+describe('text elements', () => {
+  const text = {
+    id: 't1',
+    type: 'text',
+    color: '#123456',
+    start: point,
+    text: 'Hello',
+    fontSize: 24,
+  };
+
+  it('accepts a text with and without its options', () => {
+    expect(elementAddPayload.safeParse(text).success).toBe(true);
+    const styled = { ...text, font: 'mono', align: 'center', opacity: 0.5 };
+    expect(elementAddPayload.parse(styled)).toEqual(styled);
+  });
+
+  it.each([
+    ['empty text', { text: '' }],
+    ['blank text', { text: '  \n ' }],
+    ['overlong text', { text: 'x'.repeat(LIMITS.maxTextLength + 1) }],
+    ['tiny font', { fontSize: LIMITS.minFontSize - 1 }],
+    ['huge font', { fontSize: LIMITS.maxFontSize + 1 }],
+    ['unknown font', { font: 'wingdings' }],
+    ['unknown alignment', { align: 'justify' }],
+  ])('rejects %s', (_label, override) => {
+    expect(elementAddPayload.safeParse({ ...text, ...override }).success).toBe(false);
+  });
+});
+
+describe('elementAddPayload with a complete stroke', () => {
+  const stroke = { id: 's1', type: 'stroke', color: '#000000', width: 3, points: [point] };
+
+  it('accepts a stroke that has points', () => {
+    expect(elementAddPayload.safeParse(stroke).success).toBe(true);
+  });
+
+  it('rejects a stroke without points or over the per-stroke limit', () => {
+    expect(elementAddPayload.safeParse({ ...stroke, points: [] }).success).toBe(false);
+    const points = Array.from({ length: LIMITS.maxPointsPerStroke + 1 }, () => point);
+    expect(elementAddPayload.safeParse({ ...stroke, points }).success).toBe(false);
+  });
+});
+
+describe('element batches', () => {
+  const rect = (id: string) => ({
+    id,
+    type: 'rect',
+    color: '#112233',
+    width: 3,
+    start: point,
+    end: { x: 50, y: 60 },
+  });
+  const stroke = (id: string, n: number) => ({
+    id,
+    type: 'stroke',
+    color: '#000000',
+    width: 3,
+    points: Array.from({ length: n }, () => point),
+  });
+
+  it('accepts a mixed batch and strips server-owned fields', () => {
+    const parsed = elementsAddPayload.parse({
+      elements: [{ ...rect('a'), authorId: 'x', createdAt: 1 }, stroke('b', 2)],
+    });
+    expect(parsed.elements[0]).not.toHaveProperty('authorId');
+    expect(elementsUpdatePayload.safeParse({ elements: [rect('a')] }).success).toBe(true);
+  });
+
+  it.each([
+    ['an empty batch', []],
+    ['repeated ids', [rect('a'), rect('a')]],
+    [
+      'too many elements',
+      Array.from({ length: LIMITS.maxElementsPerMessage + 1 }, (_, i) => rect(`r${i}`)),
+    ],
+    ['too many points', [stroke('a', LIMITS.maxPointsPerBatch), stroke('b', 1)]],
+  ])('rejects %s', (_label, elements) => {
+    expect(elementsAddPayload.safeParse({ elements }).success).toBe(false);
+    expect(elementsUpdatePayload.safeParse({ elements }).success).toBe(false);
+  });
+
+  it('validates id lists for delete and reorder', () => {
+    expect(elementsDeletePayload.safeParse({ ids: ['a', 'b'] }).success).toBe(true);
+    expect(elementsDeletePayload.safeParse({ ids: [] }).success).toBe(false);
+    expect(elementsDeletePayload.safeParse({ ids: ['a b'] }).success).toBe(false);
+    const tooMany = Array.from({ length: LIMITS.maxIdsPerMessage + 1 }, (_, i) => `e${i}`);
+    expect(elementsDeletePayload.safeParse({ ids: tooMany }).success).toBe(false);
+    expect(elementsReorderPayload.safeParse({ ids: ['a'], to: 'front' }).success).toBe(true);
+    expect(elementsReorderPayload.safeParse({ ids: ['a'], to: 'middle' }).success).toBe(false);
+  });
+});
+
+describe('toElementInput', () => {
+  it('drops the author and time', () => {
+    const stored = {
+      id: 't',
+      type: 'text' as const,
+      authorId: 'a',
+      createdAt: 5,
+      color: '#000000',
+      start: point,
+      text: 'x',
+      fontSize: 20,
+    };
+    expect(toElementInput(stored)).toEqual({
+      id: 't',
+      type: 'text',
+      color: '#000000',
+      start: point,
+      text: 'x',
+      fontSize: 20,
+    });
   });
 });
