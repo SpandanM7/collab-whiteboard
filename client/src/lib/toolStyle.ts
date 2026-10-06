@@ -3,6 +3,8 @@ import {
   FILL_STYLES,
   LINE_ROUTES,
   STROKE_STYLES,
+  TEXT_ALIGNS,
+  TEXT_FONTS,
   colorSchema,
   isClosedShape,
 } from '@whiteboard/shared';
@@ -14,7 +16,11 @@ import type {
   Shape,
   ShapeType,
   StrokeStyle,
+  TextAlign,
+  TextElement,
+  TextFont,
 } from '@whiteboard/shared';
+import { LIMITS } from '@whiteboard/shared';
 
 export const MIN_WIDTH = 1;
 export const MAX_WIDTH = 40;
@@ -35,6 +41,10 @@ export type ToolStyle = {
   startHead: Arrowhead;
   endHead: Arrowhead;
   route: LineRoute;
+  /** Text tool. */
+  font: TextFont;
+  fontSize: number;
+  align: TextAlign;
 };
 
 const isColor = (v: unknown) => colorSchema.safeParse(v).success;
@@ -55,6 +65,9 @@ const VALID: { [K in keyof ToolStyle]: (v: unknown) => boolean } = {
   startHead: isOneOf(ARROWHEADS),
   endHead: isOneOf(ARROWHEADS),
   route: isOneOf(LINE_ROUTES),
+  font: isOneOf(TEXT_FONTS),
+  fontSize: (v) => typeof v === 'number' && v >= LIMITS.minFontSize && v <= LIMITS.maxFontSize,
+  align: isOneOf(TEXT_ALIGNS),
 };
 
 export const DEFAULT_STYLE: ToolStyle = {
@@ -69,6 +82,9 @@ export const DEFAULT_STYLE: ToolStyle = {
   startHead: 'none',
   endHead: 'arrow',
   route: 'straight',
+  font: 'sans',
+  fontSize: 24,
+  align: 'left',
 };
 
 /** Quick picks for outlines and fills; the color inputs still allow any color. */
@@ -151,5 +167,21 @@ export function createShape(
     ...(style.route !== 'straight' ? { route: style.route } : {}),
     ...(type === 'arrow' && style.startHead !== 'none' ? { startHead: style.startHead } : {}),
     ...(type === 'arrow' && style.endHead !== 'arrow' ? { endHead: style.endHead } : {}),
+  };
+}
+
+/** A text in the current style; options at their default are left out, like shapes. */
+export function createText(
+  base: { id: string; authorId: string; createdAt: number; start: Point; text: string },
+  style: ToolStyle,
+): TextElement {
+  return {
+    ...base,
+    type: 'text',
+    color: style.color,
+    fontSize: style.fontSize,
+    ...(style.font !== 'sans' ? { font: style.font } : {}),
+    ...(style.align !== 'left' ? { align: style.align } : {}),
+    ...(style.opacity < 1 ? { opacity: style.opacity } : {}),
   };
 }
