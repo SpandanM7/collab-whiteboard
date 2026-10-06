@@ -8,6 +8,7 @@ import type {
   Shape,
   Stroke,
   StrokeStyle,
+  TextElement,
 } from '@whiteboard/shared';
 import {
   cornerRadius,
@@ -18,6 +19,7 @@ import {
   normalizedBox,
   polygonPoints,
 } from './geometry.ts';
+import { alignOf, cssFont, fontOf, layoutText } from './textLayout.ts';
 
 /** Draws one stroke, smoothing the polyline with quadratic curves through segment midpoints. */
 export function drawStroke(ctx: CanvasRenderingContext2D, stroke: Stroke): void {
@@ -212,7 +214,37 @@ export function drawShape(ctx: CanvasRenderingContext2D, shape: Shape): void {
   ctx.restore();
 }
 
+/** Draws a text block: each line on its own row, aligned inside the block. */
+export function drawText(ctx: CanvasRenderingContext2D, text: TextElement): void {
+  const layout = layoutText(text);
+  const align = alignOf(text);
+  ctx.save();
+  ctx.globalAlpha = text.opacity ?? 1;
+  ctx.fillStyle = text.color;
+  ctx.font = cssFont(fontOf(text), text.fontSize);
+  ctx.textAlign = align;
+  ctx.textBaseline = 'middle';
+  const x =
+    align === 'left'
+      ? text.start.x
+      : align === 'center'
+        ? text.start.x + layout.width / 2
+        : text.start.x + layout.width;
+  layout.lines.forEach((line, i) => {
+    ctx.fillText(line, x, text.start.y + layout.lineHeight * (i + 0.5));
+  });
+  ctx.restore();
+}
+
 export function drawElement(ctx: CanvasRenderingContext2D, element: BoardElement): void {
-  if (element.type === 'stroke') drawStroke(ctx, element);
-  else drawShape(ctx, element);
+  switch (element.type) {
+    case 'stroke':
+      drawStroke(ctx, element);
+      break;
+    case 'text':
+      drawText(ctx, element);
+      break;
+    default:
+      drawShape(ctx, element);
+  }
 }
