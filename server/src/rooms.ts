@@ -1,12 +1,12 @@
-import { LIMITS } from '@whiteboard/shared';
+import { LIMITS, pointCountOf } from '@whiteboard/shared';
 import type {
   Board,
   BoardElement,
-  ElementAddPayload,
+  ElementInput,
   ErrorCode,
   Participant,
   Point,
-  Shape,
+  ReorderTarget,
   Stroke,
   StrokeStartPayload,
 } from '@whiteboard/shared';
@@ -34,10 +34,11 @@ export const DEFAULT_ROOM_LIMITS: RoomLimits = {
 };
 
 export type RoomError = { code: ErrorCode; message: string };
-export type Result<T> = { ok: true; value: T } | { ok: false; error: RoomError };
+export type Failure = { ok: false; error: RoomError };
+export type Result<T> = { ok: true; value: T } | Failure;
 
 const ok = <T>(value: T): Result<T> => ({ ok: true, value });
-const fail = (code: ErrorCode, message: string): Result<never> => ({
+const fail = (code: ErrorCode, message: string): Failure => ({
   ok: false,
   error: { code, message },
 });
@@ -206,27 +207,132 @@ export class Rooms {
   }
 
   /**
-   * Adds a finished shape in one step; shapes are not streamed. The author is the sender, and
-   * `createdAt` is the server's clock. Returns the stored shape, which is what gets relayed.
+   * Adds a finished element in one step (a shape, a text, or a complete stroke); these are not
+   * streamed. The author is the sender, and `createdAt` is the server's clock. Returns the stored
+   * element, which is what gets relayed.
    */
-  addElement(boardId: string, clientId: string, payload: ElementAddPayload): Result<Shape> {
+  addElement(boardId: string, clientId: string, payload: ElementInput): Result<BoardElement> {
     const room = this.memberRoom(boardId, clientId);
     if (!room.ok) return room;
     const r = room.value;
 
     if (r.byId.has(payload.id)) return fail('duplicate_id', 'An element with that id exists.');
-    if (r.board.elements.length >= this.limits.maxElementsPerBoard) {
-      return fail(
-        'board_full',
-        `A board holds at most ${this.limits.maxElementsPerBoard} elements.`,
-      );
-    }
+    const full = this.checkRoomFor(r, pointCountOf(payload));
+    if (full) return full;
+    return ok(this.insert(r, payload, clientId));
+  }
 
-    const shape: Shape = { ...payload, authorId: clientId, createdAt: this.now() };
-    r.board.elements.push(shape);
-    r.byId.set(shape.id, shape);
+  /**
+   * Adds several finished elements, in order. Ids the board already has are skipped (a replay
+   * after a reconnect must not duplicate anything). Elements that no longer fit are skipped too,
+   * and reported as `board_full` alongside the ones that were added.
+   */
+  addElements(
+    boardId: string,
+    clientId: string,
+    inputs: ElementInput[],
+  ): Result<{ added: BoardElement[]; error?: RoomError }> {
+    const room = this.memberRoom(boardId, clientId);
+    if (!room.ok) return room;
+    const r = room.value;
+
+    const added: BoardElement[] = [];
+    let error: RoomError | undefined;
+    for (const input of inputs) {
+      if (r.byId.has(input.id)) continue;
+      const full = this.checkRoomFor(r, pointCountOf(input));
+      if (full) {
+        error = full.error;
+        continue;
+      }
+      added.push(this.insert(r, input, clientId));
+    }
+    return ok({ added, error });
+  }
+
+  /**
+   * Replaces existing elements by id, keeping each one's place in the stacking order, author and
+   * creation time. Ids not on the board are skipped: an element someone deleted stays deleted.
+   * A stroke still being drawn is finished by its replacement. A replacement that would take the
+   * board over its point budget is skipped and reported as `board_full`.
+   */
+  updateElements(
+    boardId: string,
+    clientId: string,
+    inputs: ElementInput[],
+  ): Result<{ updated: BoardElement[]; error?: RoomError }> {
+    const room = this.memberRoom(boardId, clientId);
+    if (!room.ok) return room;
+    const r = room.value;
+
+    const updated: BoardElement[] = [];
+    let error: RoomError | undefined;
+    for (const input of inputs) {
+      const current = r.byId.get(input.id);
+      if (!current) continue;
+      const delta = pointCountOf(input) - pointCountOf(current);
+      if (delta > 0 && r.pointCount + delta > this.limits.maxPointsPerBoard) {
+        error = this.boardTooBig().error;
+        continue;
+      }
+      const next = {
+        ...input,
+        authorId: current.authorId,
+        createdAt: current.createdAt,
+      } as BoardElement;
+      const index = r.board.elements.indexOf(current);
+      r.board.elements[index] = next;
+      r.byId.set(next.id, next);
+      r.pointCount += delta;
+      r.active.delete(next.id);
+      updated.push(next);
+    }
+    if (updated.length > 0) this.touch(r);
+    return ok({ updated, error });
+  }
+
+  /** Removes several elements. Resolves to the ids that were actually there. */
+  deleteElements(boardId: string, clientId: string, ids: string[]): Result<string[]> {
+    const room = this.memberRoom(boardId, clientId);
+    if (!room.ok) return room;
+    const r = room.value;
+
+    const removed = new Set<string>();
+    for (const id of ids) {
+      const element = r.byId.get(id);
+      if (!element) continue;
+      r.byId.delete(id);
+      r.active.delete(id);
+      r.pointCount -= pointCountOf(element);
+      removed.add(id);
+    }
+    if (removed.size === 0) return ok([]);
+    r.board.elements = r.board.elements.filter((e) => !removed.has(e.id));
     this.touch(r);
-    return ok(shape);
+    return ok([...removed]);
+  }
+
+  /**
+   * Moves elements to the top or the bottom of the stack, keeping their order relative to each
+   * other. Resolves to the ids that exist, in stacking order.
+   */
+  reorderElements(
+    boardId: string,
+    clientId: string,
+    ids: string[],
+    to: ReorderTarget,
+  ): Result<string[]> {
+    const room = this.memberRoom(boardId, clientId);
+    if (!room.ok) return room;
+    const r = room.value;
+
+    const wanted = new Set(ids);
+    const moved = r.board.elements.filter((e) => wanted.has(e.id));
+    if (moved.length === 0) return ok([]);
+    const rest = r.board.elements.filter((e) => !wanted.has(e.id));
+    r.board.elements = to === 'front' ? [...rest, ...moved] : [...moved, ...rest];
+    this.touch(r);
+    return ok(moved.map((e) => e.id));
   }
 
   /** Appends points to a stroke the client is currently drawing. */
@@ -269,7 +375,7 @@ export class Rooms {
     const removed = r.byId.get(id);
     if (!removed) return ok(false);
     r.byId.delete(id);
-    if (removed.type === 'stroke') r.pointCount -= removed.points.length;
+    r.pointCount -= pointCountOf(removed);
     r.board.elements = r.board.elements.filter((e) => e.id !== id);
     r.active.delete(id);
     this.touch(r);
@@ -289,7 +395,30 @@ export class Rooms {
     return ok(undefined);
   }
 
-  private boardTooBig(): Result<never> {
+  /** Why one more element with `points` points does not fit, or null if it does. */
+  private checkRoomFor(r: Room, points: number): Failure | null {
+    if (r.board.elements.length >= this.limits.maxElementsPerBoard) {
+      return fail(
+        'board_full',
+        `A board holds at most ${this.limits.maxElementsPerBoard} elements.`,
+      );
+    }
+    if (points > 0 && r.pointCount + points > this.limits.maxPointsPerBoard) {
+      return this.boardTooBig();
+    }
+    return null;
+  }
+
+  private insert(r: Room, input: ElementInput, clientId: string): BoardElement {
+    const element = { ...input, authorId: clientId, createdAt: this.now() } as BoardElement;
+    r.board.elements.push(element);
+    r.byId.set(element.id, element);
+    r.pointCount += pointCountOf(element);
+    this.touch(r);
+    return element;
+  }
+
+  private boardTooBig(): Failure {
     return fail(
       'board_full',
       `A board holds at most ${this.limits.maxPointsPerBoard.toLocaleString('en-US')} points.`,

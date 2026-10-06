@@ -7,6 +7,10 @@ import type {
   BoardElement,
   ClientToServerEvents,
   ElementAddedPayload,
+  ElementsAddedPayload,
+  ElementsDeletedPayload,
+  ElementsReorderedPayload,
+  ElementsUpdatedPayload,
   ErrorPayload,
   RoomStatePayload,
   ServerToClientEvents,
@@ -277,5 +281,73 @@ describe('origin check', () => {
 
   it('rejects other browser origins but allows clients that send no Origin', async () => {
     expect(await tryConnect('https://evil.example.com', ['https://app.example.com'])).toBe(false);
+  });
+});
+
+describe('element batches', () => {
+  beforeEach(() => start());
+
+  const rect = (id: string) => ({
+    id,
+    type: 'rect' as const,
+    color: '#112233',
+    width: 2,
+    start: { x: 0, y: 0 },
+    end: { x: 10, y: 10 },
+  });
+
+  it('relays added, updated, reordered and deleted elements to the others', async () => {
+    const a = await join('Ann');
+    const b = await join('Bob');
+
+    const added = next<ElementsAddedPayload>(b.client, SERVER_EVENTS.elementsAdded);
+    a.client.emit(CLIENT_EVENTS.elementsAdd, { elements: [rect('r1'), rect('r2')] });
+    expect((await added).elements.map((e) => [e.id, e.authorId])).toEqual([
+      ['r1', a.client.id],
+      ['r2', a.client.id],
+    ]);
+
+    // Bob sends this one, so Ann hears about it; the unknown id is left out.
+    const updated = next<ElementsUpdatedPayload>(a.client, SERVER_EVENTS.elementsUpdated);
+    b.client.emit(CLIENT_EVENTS.elementsUpdate, {
+      elements: [{ ...rect('r1'), color: '#ff0000' }, rect('gone')],
+    });
+    const { elements } = await updated;
+    expect(elements).toHaveLength(1);
+    expect(elements[0]).toMatchObject({ id: 'r1', color: '#ff0000', authorId: a.client.id });
+
+    const reordered = next<ElementsReorderedPayload>(b.client, SERVER_EVENTS.elementsReordered);
+    a.client.emit(CLIENT_EVENTS.elementsReorder, { ids: ['r1'], to: 'front' });
+    expect(await reordered).toEqual({ ids: ['r1'], to: 'front' });
+
+    const deleted = next<ElementsDeletedPayload>(b.client, SERVER_EVENTS.elementsDeleted);
+    a.client.emit(CLIENT_EVENTS.elementsDelete, { ids: ['r2', 'nope'] });
+    expect(await deleted).toEqual({ ids: ['r2'] });
+
+    const late = await join('Cy');
+    expect(late.state.board.elements).toMatchObject([{ id: 'r1', color: '#ff0000' }]);
+  });
+
+  it('rejects a batch with repeated ids', async () => {
+    const a = await join('Ann');
+    const error = next<ErrorPayload>(a.client, SERVER_EVENTS.error);
+    a.client.emit(CLIENT_EVENTS.elementsAdd, { elements: [rect('r1'), rect('r1')] });
+    expect((await error).code).toBe('invalid_payload');
+  });
+});
+
+describe('element batches under the rate limit', () => {
+  beforeEach(() => start({ burst: 4, perSecond: 0.001 }));
+
+  it('charges stroke points on top of the event itself', async () => {
+    const a = await join('Ann');
+    const points = Array.from({ length: LIMITS.pointsPerToken * 3 }, (_, i) => ({ x: i, y: 0 }));
+    const stroke = { id: 's1', type: 'stroke' as const, color: '#000000', width: 2, points };
+    const error = next<ErrorPayload>(a.client, SERVER_EVENTS.error);
+    // Joining took one token and the event another; its points want three more of the two left.
+    a.client.emit(CLIENT_EVENTS.elementsAdd, { elements: [stroke] });
+    expect((await error).code).toBe('rate_limited');
+    const late = await join('Bob').catch(() => null);
+    expect(late?.state.board.elements ?? []).toEqual([]);
   });
 });

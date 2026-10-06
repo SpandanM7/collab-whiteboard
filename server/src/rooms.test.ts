@@ -539,3 +539,149 @@ describe('evictIdleBoards', () => {
     expectOk(rooms.join('board-bbbbbbb', bob));
   });
 });
+
+describe('batch element operations', () => {
+  const strokeInput = (id: string, n: number) => ({
+    id,
+    type: 'stroke' as const,
+    color: '#000000',
+    width: 2,
+    points: Array.from({ length: n }, (_, i) => ({ x: i, y: i })),
+  });
+  const text = (id: string, value = 'hi') => ({
+    id,
+    type: 'text' as const,
+    color: '#000000',
+    start: { x: 0, y: 0 },
+    text: value,
+    fontSize: 20,
+  });
+  const ids = (rooms: Rooms) => expectOk(rooms.join(BOARD, alice)).board.elements.map((e) => e.id);
+
+  it('adds a complete stroke and a text in one step, authored by the sender', () => {
+    const rooms = makeRooms();
+    rooms.join(BOARD, alice);
+    const { added, error } = expectOk(
+      rooms.addElements(BOARD, 'alice', [strokeInput('s', 3), text('t')]),
+    );
+    expect(error).toBeUndefined();
+    expect(added.map((e) => [e.id, e.authorId])).toEqual([
+      ['s', 'alice'],
+      ['t', 'alice'],
+    ]);
+    // A complete stroke is not in progress: nobody can append to it.
+    expectError(rooms.appendPoints(BOARD, 'alice', 's', [{ x: 1, y: 1 }]), 'unknown_stroke');
+  });
+
+  it('skips ids the board already has, so a replay never duplicates', () => {
+    const rooms = makeRooms();
+    rooms.join(BOARD, alice);
+    expectOk(rooms.addElement(BOARD, 'alice', rect('r')));
+    const { added } = expectOk(rooms.addElements(BOARD, 'alice', [rect('r'), rect('r2')]));
+    expect(added.map((e) => e.id)).toEqual(['r2']);
+    expect(ids(rooms)).toEqual(['r', 'r2']);
+  });
+
+  it('adds what fits and reports board_full for the rest', () => {
+    const rooms = makeRooms({ maxElementsPerBoard: 2 });
+    rooms.join(BOARD, alice);
+    const { added, error } = expectOk(
+      rooms.addElements(BOARD, 'alice', [rect('a'), rect('b'), rect('c')]),
+    );
+    expect(added).toHaveLength(2);
+    expect(error?.code).toBe('board_full');
+  });
+
+  it('counts added stroke points against the board budget', () => {
+    const rooms = makeRooms({ maxPointsPerBoard: 5 });
+    rooms.join(BOARD, alice);
+    const { added, error } = expectOk(
+      rooms.addElements(BOARD, 'alice', [strokeInput('a', 3), strokeInput('b', 3)]),
+    );
+    expect(added.map((e) => e.id)).toEqual(['a']);
+    expect(error?.code).toBe('board_full');
+  });
+
+  it('replaces elements in place, keeping author, time and stacking order', () => {
+    const rooms = makeRooms();
+    rooms.join(BOARD, alice);
+    rooms.join(BOARD, bob);
+    const original = expectOk(rooms.addElement(BOARD, 'alice', rect('a')));
+    expectOk(rooms.addElement(BOARD, 'alice', rect('b')));
+    const moved = { ...rect('a'), start: { x: 50, y: 50 }, end: { x: 60, y: 60 } };
+    const { updated } = expectOk(rooms.updateElements(BOARD, 'bob', [moved]));
+    expect(updated[0]).toMatchObject({
+      ...moved,
+      authorId: 'alice',
+      createdAt: original.createdAt,
+    });
+    const { board } = expectOk(rooms.join(BOARD, alice));
+    expect(board.elements.map((e) => e.id)).toEqual(['a', 'b']);
+    expect(board.elements[0]).toMatchObject({ start: { x: 50, y: 50 } });
+  });
+
+  it('does not bring back an element someone else deleted', () => {
+    const rooms = makeRooms();
+    rooms.join(BOARD, alice);
+    expectOk(rooms.addElement(BOARD, 'alice', rect('a')));
+    expectOk(rooms.deleteElement(BOARD, 'alice', 'a'));
+    const { updated } = expectOk(rooms.updateElements(BOARD, 'alice', [rect('a')]));
+    expect(updated).toEqual([]);
+    expect(ids(rooms)).toEqual([]);
+  });
+
+  it('keeps the point budget in step when a stroke is replaced', () => {
+    const rooms = makeRooms({ maxPointsPerBoard: 6 });
+    rooms.join(BOARD, alice);
+    expectOk(rooms.addElements(BOARD, 'alice', [strokeInput('a', 4)]));
+    // Growing past the budget is refused; shrinking frees room for another stroke.
+    const grown = expectOk(rooms.updateElements(BOARD, 'alice', [strokeInput('a', 7)]));
+    expect(grown.updated).toEqual([]);
+    expect(grown.error?.code).toBe('board_full');
+    expectOk(rooms.updateElements(BOARD, 'alice', [strokeInput('a', 2)]));
+    const { added } = expectOk(rooms.addElements(BOARD, 'alice', [strokeInput('b', 4)]));
+    expect(added).toHaveLength(1);
+  });
+
+  it('finishes a stroke in progress when it is replaced', () => {
+    const rooms = makeRooms();
+    rooms.join(BOARD, alice);
+    expectOk(rooms.startStroke(BOARD, 'alice', start('s')));
+    expectOk(rooms.updateElements(BOARD, 'alice', [strokeInput('s', 3)]));
+    expectError(rooms.appendPoints(BOARD, 'alice', 's', [{ x: 1, y: 1 }]), 'unknown_stroke');
+  });
+
+  it('deletes several elements and reports only the ones that existed', () => {
+    const rooms = makeRooms({ maxPointsPerBoard: 4 });
+    rooms.join(BOARD, alice);
+    expectOk(rooms.addElements(BOARD, 'alice', [strokeInput('a', 4), rect('b'), rect('c')]));
+    expect(expectOk(rooms.deleteElements(BOARD, 'alice', ['a', 'c', 'zzz']))).toEqual(['a', 'c']);
+    expect(ids(rooms)).toEqual(['b']);
+    // The deleted stroke's points are free again.
+    expect(expectOk(rooms.addElements(BOARD, 'alice', [strokeInput('d', 4)])).added).toHaveLength(
+      1,
+    );
+  });
+
+  it('moves elements to the front or back, keeping their relative order', () => {
+    const rooms = makeRooms();
+    rooms.join(BOARD, alice);
+    expectOk(rooms.addElements(BOARD, 'alice', ['a', 'b', 'c', 'd'].map(rect)));
+    expect(expectOk(rooms.reorderElements(BOARD, 'alice', ['c', 'a', 'x'], 'front'))).toEqual([
+      'a',
+      'c',
+    ]);
+    expect(ids(rooms)).toEqual(['b', 'd', 'a', 'c']);
+    expectOk(rooms.reorderElements(BOARD, 'alice', ['c', 'd'], 'back'));
+    expect(ids(rooms)).toEqual(['d', 'c', 'b', 'a']);
+  });
+
+  it('requires membership for every batch operation', () => {
+    const rooms = makeRooms();
+    rooms.join(BOARD, alice);
+    expectError(rooms.addElements(BOARD, 'bob', [rect('a')]), 'not_in_room');
+    expectError(rooms.updateElements(BOARD, 'bob', [rect('a')]), 'not_in_room');
+    expectError(rooms.deleteElements(BOARD, 'bob', ['a']), 'not_in_room');
+    expectError(rooms.reorderElements(BOARD, 'bob', ['a'], 'front'), 'not_in_room');
+  });
+});
