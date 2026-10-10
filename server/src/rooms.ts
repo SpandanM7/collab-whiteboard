@@ -146,6 +146,13 @@ export class Rooms {
     return ok(undefined);
   }
 
+  /** Checks a laser pointer trail may be relayed. Trails are never stored, not even for joiners. */
+  pointLaser(boardId: string, clientId: string): Result<void> {
+    const room = this.memberRoom(boardId, clientId);
+    if (!room.ok) return room;
+    return ok(undefined);
+  }
+
   /** Drops boards nobody is in that have been idle past the TTL. Returns how many were dropped. */
   evictIdleBoards(): number {
     const cutoff = this.now() - this.limits.boardIdleTtlMs;

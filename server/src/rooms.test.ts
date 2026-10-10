@@ -423,6 +423,16 @@ describe('cursors', () => {
   });
 });
 
+describe('laser pointer', () => {
+  it('lets members point and turns everyone else away', () => {
+    const rooms = new Rooms();
+    rooms.join(BOARD, alice);
+    expectOk(rooms.pointLaser(BOARD, 'alice'));
+    expectError(rooms.pointLaser(BOARD, 'mallory'), 'not_in_room');
+    expectError(rooms.pointLaser('board-9999', 'alice'), 'not_in_room');
+  });
+});
+
 describe('replaying a stroke after its author dropped', () => {
   // The client replays unsynced work as a new author. This pins down the protocol it relies on.
   it('lets a new member replace the truncated copy a departed author left behind', () => {

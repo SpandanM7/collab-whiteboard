@@ -15,6 +15,8 @@ import {
   participantJoinedPayload,
   participantLeftPayload,
   elementDeletePayload,
+  laserMovePayload,
+  laserMovedPayload,
   roomJoinPayload,
   strokeEndPayload,
   strokePointsPayload,
@@ -143,6 +145,26 @@ describe('presence payloads', () => {
     expect(cursorMovedPayload.safeParse({ point }).success).toBe(false);
     expect(participantLeftPayload.safeParse({ clientId: 'abc' }).success).toBe(true);
     expect(participantLeftPayload.safeParse({}).success).toBe(false);
+  });
+
+  it('validates laser:move trails', () => {
+    expect(laserMovePayload.safeParse({ id: 'trail1', points: [point] }).success).toBe(true);
+    expect(laserMovePayload.safeParse({ id: 'trail1', points: [] }).success).toBe(false);
+    expect(laserMovePayload.safeParse({ id: '../x', points: [point] }).success).toBe(false);
+    expect(
+      laserMovePayload.safeParse({ id: 'trail1', points: [{ x: Infinity, y: 0 }] }).success,
+    ).toBe(false);
+    const tooMany = Array.from({ length: LIMITS.maxLaserPointsPerMessage + 1 }, () => point);
+    expect(laserMovePayload.safeParse({ id: 'trail1', points: tooMany }).success).toBe(false);
+  });
+
+  it('strips a spoofed clientId from laser:move and requires one on laser:moved', () => {
+    const payload = { id: 'trail1', points: [point] };
+    expect(laserMovePayload.parse({ ...payload, clientId: 'spoofed' })).not.toHaveProperty(
+      'clientId',
+    );
+    expect(laserMovedPayload.safeParse({ ...payload, clientId: 'abc' }).success).toBe(true);
+    expect(laserMovedPayload.safeParse(payload).success).toBe(false);
   });
 
   it('accepts a participant with or without a cursor', () => {
