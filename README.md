@@ -14,12 +14,14 @@ cursors and presence. No account needed.
 - Shapes: rectangle, ellipse, diamond, triangle, hexagon, cylinder, star, line and arrow. They appear for others when you release the mouse
   - Style panel: color swatches, solid / hatched / cross-hatched fill, solid / dashed / dotted outline, rounded corners, opacity, straight or elbow lines, and five arrowhead styles for each end of an arrow. The last style used is remembered
   - Precision: Shift snaps lines to 15° steps and makes squares and circles, Alt draws from the center, and an optional dot grid (Ctrl + ') snaps shapes to it. A label shows the size, or length and angle, while dragging
-  - Keyboard: V select, P pen, E eraser, H hand, T text, R rectangle, O ellipse, D diamond, L line, A arrow (press ? for every shortcut)
+  - Keyboard: V select, P pen, E eraser, H hand, K laser, T text, R rectangle, O ellipse, D diamond, L line, A arrow (press ? for every shortcut)
 - Select, move and resize: click, Shift+click or drag a marquee; drag to move (Shift locks the axis, the grid snaps); eight handles resize (Shift keeps proportions, Alt resizes from the center, dragging past the opposite side flips); lines and arrows get a handle on each end. Arrow keys nudge. A floating bar (and shortcuts) duplicates, brings to front, sends to back and deletes; the style panel restyles the selection
 - Text: click with the Text tool (or double-click the board) and type in place; four fonts, four sizes, alignment, color and opacity. Double-click or Enter edits it
 - Copy, cut and paste (Ctrl+C / X / V) between boards and tabs; pasting plain text makes a text element. Ctrl+D duplicates
 - Undo and redo (Ctrl+Z, Ctrl+Shift+Z / Ctrl+Y, or the buttons), per person: undo only reverts your own changes and never overwrites someone else's newer edit. One eraser drag or a burst of nudges is one step
-- Export as PNG: whole board or just the selection, white or transparent background, 1x to 3x, with a live preview; download, copy to the clipboard, or share from a phone
+- Export as PNG or SVG: whole board or just the selection, white or transparent background, 1x to 3x (PNG), with a live preview; download, copy to the clipboard, or share from a phone
+- Save to file (Ctrl+S) downloads the board as JSON; Open file (Ctrl+O) adds a saved board to any board, in the same place, as one undo step. A manual backup until boards are stored on the server
+- Laser pointer (K, or More on smaller screens): press and drag to point things out; the trail shows for everyone in your color and fades after a second. Nothing is added to the board
 - Real-time sync: remote strokes appear while they are being drawn
 - Live cursors with name labels, plus a participant list (names are editable)
 - Clear board (with confirmation), synced to everyone

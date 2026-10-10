@@ -12,6 +12,7 @@ import type {
   Stroke,
 } from '@whiteboard/shared';
 import type { Identity } from '../lib/identity.ts';
+import { LaserTrails, SELF } from '../lib/laser.ts';
 import { PendingSync, takeFromOutbox } from '../lib/pendingSync.ts';
 import type { Job, Outgoing, OutboxItem } from '../lib/pendingSync.ts';
 import { boardReducer, initialBoardState } from './boardReducer.ts';
@@ -33,6 +34,11 @@ const OUTBOX_INTERVAL_MS = 100;
 
 /** Local cursor updates are sent at most this often (SPEC FR-4: about 30 to 60 ms). */
 const CURSOR_INTERVAL_MS = 40;
+/**
+ * Local laser points are sent in one `laser:move` at most this often. With cursor updates this
+ * stays well under the server's per-socket rate limit while pointing.
+ */
+const LASER_INTERVAL_MS = 50;
 /** How often idle remote cursors are checked for expiry. */
 const CURSOR_EXPIRY_CHECK_MS = 1000;
 
@@ -126,6 +132,12 @@ export function useBoardSync(boardId: string, identity: Identity) {
     lastSentAt: number;
     timer: ReturnType<typeof setTimeout> | undefined;
   }>({ latest: null, lastSentAt: 0, timer: undefined });
+  /** Laser trails on screen (ours and other people's). Never synced as board state. */
+  const [laser] = useState(() => new LaserTrails());
+  const laserRef = useRef<{
+    pending: { id: string; points: Point[] } | null;
+    timer: ReturnType<typeof setTimeout> | undefined;
+  }>({ pending: null, timer: undefined });
 
   const showToast = useCallback((message: string, kind: Toast['kind'] = 'error') => {
     setToast({ id: ++toastIdRef.current, message, kind });
@@ -291,6 +303,9 @@ export function useBoardSync(boardId: string, identity: Identity) {
     socket.on(SERVER_EVENTS.cursorMoved, ({ clientId, point }) => {
       dispatchPresence({ type: 'cursor', clientId, point, now: Date.now() });
     });
+    socket.on(SERVER_EVENTS.laserMoved, ({ clientId, id, points }) => {
+      laser.add(clientId, id, points, performance.now(), LASER_INTERVAL_MS);
+    });
     socket.on(SERVER_EVENTS.error, ({ code, message }) => {
       console.warn(`Server error (${code}): ${message}`);
       if (JOIN_ERRORS.has(code)) setBlocked(message);
@@ -303,8 +318,13 @@ export function useBoardSync(boardId: string, identity: Identity) {
     );
 
     const cursor = cursorRef.current;
+    const laserSend = laserRef.current;
     return () => {
       clearInterval(expiryTimer);
+      clearTimeout(laserSend.timer);
+      laserSend.timer = undefined;
+      laserSend.pending = null;
+      laser.clear();
       clearTimeout(cursor.timer);
       cursor.timer = undefined;
       cursor.latest = null;
@@ -320,7 +340,7 @@ export function useBoardSync(boardId: string, identity: Identity) {
       socketRef.current = null;
       socket.disconnect();
     };
-  }, [boardId, pendingSync, resetOutbox, startOutbox, showToast]);
+  }, [boardId, pendingSync, resetOutbox, startOutbox, showToast, laser]);
 
   // Closing the tab with unsynced work would lose it: let the browser ask first.
   useEffect(() => {
@@ -363,6 +383,40 @@ export function useBoardSync(boardId: string, identity: Identity) {
       cursor.timer = setTimeout(sendCursor, wait);
     },
     [sendCursor],
+  );
+
+  const flushLaser = useCallback(() => {
+    const send = laserRef.current;
+    clearTimeout(send.timer);
+    send.timer = undefined;
+    const pending = send.pending;
+    send.pending = null;
+    if (!pending) return;
+    emitIfJoined((socket) => {
+      for (let i = 0; i < pending.points.length; i += LIMITS.maxLaserPointsPerMessage) {
+        socket.emit(CLIENT_EVENTS.laserMove, {
+          id: pending.id,
+          points: pending.points.slice(i, i + LIMITS.maxLaserPointsPerMessage),
+        });
+      }
+    });
+  }, [emitIfJoined]);
+
+  /**
+   * The local laser pointer moved (board space): show the trail here, and send it in batches.
+   * Pointing is never queued: offline, only this screen shows it.
+   */
+  const pointLaser = useCallback(
+    (id: string, points: Point[]) => {
+      if (points.length === 0) return;
+      laser.add(SELF, id, points, performance.now());
+      const send = laserRef.current;
+      if (send.pending && send.pending.id !== id) flushLaser();
+      const pending = (send.pending ??= { id, points: [] });
+      pending.points.push(...points);
+      send.timer ??= setTimeout(flushLaser, LASER_INTERVAL_MS);
+    },
+    [flushLaser, laser],
   );
 
   /** A local stroke began. It is already on screen; this tells everyone else, if we can. */
@@ -542,6 +596,8 @@ export function useBoardSync(boardId: string, identity: Identity) {
     dismissToast: useCallback(() => setToast(null), []),
     clearCount,
     moveCursor,
+    laser,
+    pointLaser,
     startStroke,
     addPoints,
     finishStroke,

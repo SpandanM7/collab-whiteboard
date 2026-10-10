@@ -222,6 +222,16 @@ body,
   cursor: pointer;
 }
 
+/* Laser pointer trails: over the board, under the cursors, never in the way of a click. */
+.laser-layer {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  height: 100dvh;
+  pointer-events: none;
+}
+
 .cursor-layer {
   position: fixed;
   inset: 0;
@@ -1139,6 +1149,24 @@ input.participant-name:focus {
   display: none;
 }
 
+/*
+ * The laser gets a toolbar button only where the bar has room to spare (finger-sized buttons on
+ * a landscape tablet would otherwise reach the participant list); elsewhere it is in More.
+ */
+.more-menu .unless-roomy {
+  display: none;
+}
+
+@media (max-width: 1279px) {
+  .toolbar .roomy-only {
+    display: none;
+  }
+
+  .more-menu .unless-roomy {
+    display: block;
+  }
+}
+
 /* The More menu: export, shortcuts and clearing the board. */
 .more-menu {
   position: absolute;
@@ -1500,12 +1528,15 @@ kbd {
     display: block;
   }
 
-  /* Opens upward from the bottom toolbar, at the right. */
+  /* Opens upward from the bottom toolbar, at the right; scrolls on short screens. */
   .more-menu {
     top: auto;
     right: calc(var(--safe-right) + 12px);
     bottom: calc(100% + 8px);
     min-width: 230px;
+    max-height: calc(100dvh - var(--toolbar-h) - var(--safe-bottom) - var(--safe-top) - 24px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
   }
 
   .toolbar .more-menu button {

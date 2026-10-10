@@ -17,6 +17,7 @@ describe('shortcutFor', () => {
     ['p', 'pen'],
     ['e', 'eraser'],
     ['h', 'hand'],
+    ['k', 'laser'],
     ['r', 'rect'],
     ['o', 'ellipse'],
     ['d', 'diamond'],
@@ -41,6 +42,14 @@ describe('shortcutFor', () => {
     expect(shortcutFor(key("'", { ctrl: true }))).toEqual({ type: 'toggle-grid' });
     expect(shortcutFor(key("'", { meta: true }))).toEqual({ type: 'toggle-grid' });
     expect(shortcutFor(key("'"))).toBeNull();
+  });
+
+  it('saves and opens board files with Ctrl+S and Ctrl+O (Cmd on Mac)', () => {
+    expect(shortcutFor(key('s', { ctrl: true }))).toEqual({ type: 'save' });
+    expect(shortcutFor(key('s', { meta: true }))).toEqual({ type: 'save' });
+    expect(shortcutFor(key('o', { ctrl: true }))).toEqual({ type: 'open' });
+    expect(shortcutFor(key('s', { ctrl: true, shift: true }))).toBeNull();
+    expect(shortcutFor(key('s'))).toBeNull();
   });
 
   it('ignores other keys', () => {

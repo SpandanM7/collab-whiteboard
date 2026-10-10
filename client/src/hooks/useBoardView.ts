@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { BoardElement, Point } from '@whiteboard/shared';
 import { rectContains } from '../lib/geometry.ts';
+import type { Rect } from '../lib/geometry.ts';
 import { HOME_VIEW, centerOn, contentBounds, fitView, visibleRect, zoomAt } from '../lib/view.ts';
 import type { View } from '../lib/view.ts';
 import { uiInsets, viewportSize } from '../lib/viewport.ts';
@@ -50,5 +51,12 @@ export function useBoardView(elements: BoardElement[]) {
       changeView(bounds ? fitView(bounds, viewportSize(), uiInsets()) : HOME_VIEW);
     },
     jumpTo: (board: Point) => changeView(centerOn(view, board, viewportSize())),
+    /** Brings `bounds` into view (framing it) unless it is already all on screen. */
+    show: (bounds: Rect) => {
+      const size = viewportSize();
+      if (!rectContains(visibleRect(view, size), bounds)) {
+        changeView(fitView(bounds, size, uiInsets()));
+      }
+    },
   };
 }

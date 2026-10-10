@@ -21,8 +21,39 @@ import {
 } from './geometry.ts';
 import { alignOf, cssFont, fontOf, layoutText } from './textLayout.ts';
 
+/**
+ * The part of the canvas API that drawing uses. A real canvas context fits it, and so does the
+ * SVG export's recorder, so the PNG and SVG exports come from this one drawing code.
+ */
+export type DrawContext = Pick<
+  CanvasRenderingContext2D,
+  | 'save'
+  | 'restore'
+  | 'beginPath'
+  | 'closePath'
+  | 'moveTo'
+  | 'lineTo'
+  | 'quadraticCurveTo'
+  | 'arc'
+  | 'ellipse'
+  | 'fill'
+  | 'stroke'
+  | 'clip'
+  | 'setLineDash'
+  | 'fillText'
+  | 'strokeStyle'
+  | 'fillStyle'
+  | 'lineWidth'
+  | 'lineCap'
+  | 'lineJoin'
+  | 'globalAlpha'
+  | 'font'
+  | 'textAlign'
+  | 'textBaseline'
+>;
+
 /** Draws one stroke, smoothing the polyline with quadratic curves through segment midpoints. */
-export function drawStroke(ctx: CanvasRenderingContext2D, stroke: Stroke): void {
+export function drawStroke(ctx: DrawContext, stroke: Stroke): void {
   const { points, color, width } = stroke;
   if (points.length === 0) return;
 
@@ -64,7 +95,7 @@ export function dashPattern(style: StrokeStyle | undefined, width: number): numb
 }
 
 /** Traces a polygon whose corners are cut back by `radius` and joined with a curve. */
-function traceRounded(ctx: CanvasRenderingContext2D, points: Point[], radius: number): void {
+function traceRounded(ctx: DrawContext, points: Point[], radius: number): void {
   const n = points.length;
   const toward = (from: Point, to: Point, distance: number): Point => {
     const length = Math.hypot(to.x - from.x, to.y - from.y) || 1;
@@ -90,7 +121,7 @@ function traceRounded(ctx: CanvasRenderingContext2D, points: Point[], radius: nu
 }
 
 /** Traces the outline a closed shape's fill covers. */
-function traceClosed(ctx: CanvasRenderingContext2D, shape: ClosedShape): void {
+function traceClosed(ctx: DrawContext, shape: ClosedShape): void {
   const box = normalizedBox(shape);
   const polygon = polygonPoints(shape.type, box);
   if (polygon) {
@@ -118,7 +149,7 @@ function traceClosed(ctx: CanvasRenderingContext2D, shape: ClosedShape): void {
 }
 
 /** Fills the current path with diagonal lines (and the other diagonal too for `cross`). */
-function hatch(ctx: CanvasRenderingContext2D, shape: ClosedShape, color: string): void {
+function hatch(ctx: DrawContext, shape: ClosedShape, color: string): void {
   const box = normalizedBox(shape);
   const gap = Math.max(8, shape.width * 3);
   const size = box.right - box.left + (box.bottom - box.top);
@@ -140,7 +171,7 @@ function hatch(ctx: CanvasRenderingContext2D, shape: ClosedShape, color: string)
   ctx.restore();
 }
 
-function drawClosed(ctx: CanvasRenderingContext2D, shape: ClosedShape): void {
+function drawClosed(ctx: DrawContext, shape: ClosedShape): void {
   ctx.beginPath();
   traceClosed(ctx, shape);
   if (shape.fill) {
@@ -173,7 +204,7 @@ function drawClosed(ctx: CanvasRenderingContext2D, shape: ClosedShape): void {
   }
 }
 
-function drawHead(ctx: CanvasRenderingContext2D, kind: Arrowhead, outline: Point[]): void {
+function drawHead(ctx: DrawContext, kind: Arrowhead, outline: Point[]): void {
   if (outline.length === 0) return;
   ctx.beginPath();
   ctx.moveTo(outline[0].x, outline[0].y);
@@ -185,7 +216,7 @@ function drawHead(ctx: CanvasRenderingContext2D, kind: Arrowhead, outline: Point
   ctx.stroke();
 }
 
-function drawLine(ctx: CanvasRenderingContext2D, shape: LineShape): void {
+function drawLine(ctx: DrawContext, shape: LineShape): void {
   const path = linePath(shape);
   ctx.beginPath();
   ctx.moveTo(path[0].x, path[0].y);
@@ -201,7 +232,7 @@ function drawLine(ctx: CanvasRenderingContext2D, shape: LineShape): void {
 }
 
 /** Draws any shape: fill first (if any), then the outline on top, then any arrow heads. */
-export function drawShape(ctx: CanvasRenderingContext2D, shape: Shape): void {
+export function drawShape(ctx: DrawContext, shape: Shape): void {
   ctx.save();
   ctx.globalAlpha = shape.opacity ?? 1;
   ctx.strokeStyle = shape.color;
@@ -215,7 +246,7 @@ export function drawShape(ctx: CanvasRenderingContext2D, shape: Shape): void {
 }
 
 /** Draws a text block: each line on its own row, aligned inside the block. */
-export function drawText(ctx: CanvasRenderingContext2D, text: TextElement): void {
+export function drawText(ctx: DrawContext, text: TextElement): void {
   const layout = layoutText(text);
   const align = alignOf(text);
   ctx.save();
@@ -236,7 +267,7 @@ export function drawText(ctx: CanvasRenderingContext2D, text: TextElement): void
   ctx.restore();
 }
 
-export function drawElement(ctx: CanvasRenderingContext2D, element: BoardElement): void {
+export function drawElement(ctx: DrawContext, element: BoardElement): void {
   switch (element.type) {
     case 'stroke':
       drawStroke(ctx, element);

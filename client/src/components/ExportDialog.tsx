@@ -8,6 +8,8 @@ import {
   renderElements,
 } from '../lib/exportImage.ts';
 import type { ExportBackground } from '../lib/exportImage.ts';
+import { renderSvg } from '../lib/exportSvg.ts';
+import { copyText } from '../lib/clipboard.ts';
 
 type Props = {
   open: boolean;
@@ -20,7 +22,7 @@ type Props = {
   onNotify: (message: string, kind: 'info' | 'error') => void;
 };
 
-/** Export the board (or the selection) as a PNG: download, copy, or share (on phones). */
+/** Export the board (or the selection) as a PNG or SVG: download, copy, or share (on phones). */
 export function ExportDialog(props: Props) {
   const ref = useRef<HTMLDialogElement>(null);
   const { open, onClose } = props;
@@ -53,11 +55,16 @@ export function ExportDialog(props: Props) {
 
 const SCALES = [1, 2, 3] as const;
 
-type Rendered = { blob: Blob; url: string };
+type Format = 'png' | 'svg';
 
-function canShareFiles(): boolean {
+const MIME: Record<Format, string> = { png: 'image/png', svg: 'image/svg+xml' };
+
+/** The SVG markup is kept for copying it as text (no clipboard takes SVG images reliably). */
+type Rendered = { blob: Blob; url: string; markup?: string };
+
+function canShareFiles(format: Format): boolean {
   try {
-    const probe = new File([''], 'probe.png', { type: 'image/png' });
+    const probe = new File([''], `probe.${format}`, { type: MIME[format] });
     return typeof navigator.canShare === 'function' && navigator.canShare({ files: [probe] });
   } catch {
     return false;
@@ -72,27 +79,38 @@ function ExportBody({ onClose, boardId, elements, selected, onNotify }: Props) {
   const [scope, setScope] = useState<'all' | 'selection'>(
     selected.length > 0 ? 'selection' : 'all',
   );
+  const [format, setFormat] = useState<Format>('png');
   const [background, setBackground] = useState<ExportBackground>('white');
   const [scale, setScale] = useState<(typeof SCALES)[number]>(2);
   const [rendered, setRendered] = useState<Rendered | null>(null);
   const [busy, setBusy] = useState(false);
-  const [share] = useState(canShareFiles);
-  const [copy] = useState(canCopyImages);
+  const [shareFormats] = useState(() => ({ png: canShareFiles('png'), svg: canShareFiles('svg') }));
+  const [copyImages] = useState(canCopyImages);
+  const share = shareFormats[format];
+  // A PNG is copied as an image; an SVG as its markup, which design tools paste as a drawing.
+  const copy = format === 'svg' || copyImages;
 
   const source = scope === 'selection' && selected.length > 0 ? selected : elements;
   const frame = exportFrame(source, scale);
 
   // Re-render the image whenever an option changes; the preview is the real export.
   useEffect(() => {
-    const canvas = renderElements(source, { scale, background });
-    if (!canvas) return;
+    let job: Promise<Omit<Rendered, 'url'>> | null = null;
+    if (format === 'svg') {
+      const markup = renderSvg(source, { background });
+      if (markup) job = Promise.resolve({ blob: new Blob([markup], { type: MIME.svg }), markup });
+    } else {
+      const canvas = renderElements(source, { scale, background });
+      if (canvas) job = canvasToBlob(canvas).then((blob) => ({ blob }));
+    }
+    if (!job) return;
     let cancelled = false;
     let url = '';
-    canvasToBlob(canvas)
-      .then((blob) => {
+    job
+      .then((result) => {
         if (cancelled) return;
-        url = URL.createObjectURL(blob);
-        setRendered({ blob, url });
+        url = URL.createObjectURL(result.blob);
+        setRendered({ ...result, url });
       })
       .catch(() => {
         if (!cancelled) onNotify("The image couldn't be created.", 'error');
@@ -101,16 +119,16 @@ function ExportBody({ onClose, boardId, elements, selected, onNotify }: Props) {
       cancelled = true;
       if (url) URL.revokeObjectURL(url);
     };
-  }, [source, scale, background, onNotify]);
+  }, [source, scale, background, format, onNotify]);
 
-  const fileName = exportFileName(boardId, new Date());
+  const fileName = exportFileName(boardId, new Date(), format);
   const ready = rendered !== null && frame !== null;
 
-  const run = async (action: (blob: Blob) => Promise<void> | void) => {
+  const run = async (action: (rendered: Rendered) => Promise<void> | void) => {
     if (!rendered) return;
     setBusy(true);
     try {
-      await action(rendered.blob);
+      await action(rendered);
     } finally {
       setBusy(false);
     }
@@ -136,6 +154,26 @@ function ExportBody({ onClose, boardId, elements, selected, onNotify }: Props) {
       </div>
 
       <div className="export-options">
+        <fieldset>
+          <legend>Format</legend>
+          <div className="segmented">
+            {(['png', 'svg'] as const).map((f) => (
+              <button
+                key={f}
+                type="button"
+                className={format === f ? 'active' : ''}
+                aria-pressed={format === f}
+                onClick={() => {
+                  if (f === format) return;
+                  setRendered(null);
+                  setFormat(f);
+                }}
+              >
+                {f.toUpperCase()}
+              </button>
+            ))}
+          </div>
+        </fieldset>
         {selected.length > 0 && (
           <fieldset>
             <legend>Export</legend>
@@ -180,27 +218,37 @@ function ExportBody({ onClose, boardId, elements, selected, onNotify }: Props) {
             </button>
           </div>
         </fieldset>
-        <fieldset>
-          <legend>Scale</legend>
-          <div className="segmented">
-            {SCALES.map((s) => (
-              <button
-                key={s}
-                type="button"
-                className={scale === s ? 'active' : ''}
-                aria-pressed={scale === s}
-                aria-label={`Scale ${s}x`}
-                onClick={() => setScale(s)}
-              >
-                {s}×
-              </button>
-            ))}
-          </div>
-        </fieldset>
-        {frame && (
+        {/* A vector image has no pixel size to choose. */}
+        {format === 'png' && (
+          <fieldset>
+            <legend>Scale</legend>
+            <div className="segmented">
+              {SCALES.map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  className={scale === s ? 'active' : ''}
+                  aria-pressed={scale === s}
+                  aria-label={`Scale ${s}x`}
+                  onClick={() => setScale(s)}
+                >
+                  {s}×
+                </button>
+              ))}
+            </div>
+          </fieldset>
+        )}
+        {frame && format === 'png' && (
           <p className="export-size">
             {frame.width.toLocaleString('en-US')} × {frame.height.toLocaleString('en-US')} px
             {frame.scale < scale - 1e-6 ? ' (reduced to fit)' : ''}
+          </p>
+        )}
+        {frame && format === 'svg' && (
+          <p className="export-size">
+            {(frame.bounds.right - frame.bounds.left).toLocaleString('en-US')} ×{' '}
+            {(frame.bounds.bottom - frame.bounds.top).toLocaleString('en-US')} (vector, sharp at any
+            size)
           </p>
         )}
       </div>
@@ -211,8 +259,8 @@ function ExportBody({ onClose, boardId, elements, selected, onNotify }: Props) {
             type="button"
             disabled={!ready || busy}
             onClick={() =>
-              run(async (blob) => {
-                const file = new File([blob], fileName, { type: 'image/png' });
+              run(async ({ blob }) => {
+                const file = new File([blob], fileName, { type: MIME[format] });
                 try {
                   await navigator.share({ files: [file], title: 'Whiteboard' });
                   onClose();
@@ -233,7 +281,16 @@ function ExportBody({ onClose, boardId, elements, selected, onNotify }: Props) {
             type="button"
             disabled={!ready || busy}
             onClick={() =>
-              run(async (blob) => {
+              run(async ({ blob, markup }) => {
+                if (markup !== undefined) {
+                  if (await copyText(markup)) {
+                    onNotify('SVG copied to the clipboard.', 'info');
+                    onClose();
+                  } else {
+                    onNotify("The SVG couldn't be copied. Try Download instead.", 'error');
+                  }
+                  return;
+                }
                 try {
                   await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
                   onNotify('Image copied to the clipboard.', 'info');
@@ -252,13 +309,13 @@ function ExportBody({ onClose, boardId, elements, selected, onNotify }: Props) {
           className="primary"
           disabled={!ready || busy}
           onClick={() =>
-            run((blob) => {
+            run(({ blob }) => {
               downloadBlob(blob, fileName);
               onClose();
             })
           }
         >
-          Download PNG
+          Download {format.toUpperCase()}
         </button>
       </div>
     </>

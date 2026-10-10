@@ -7,6 +7,7 @@ export const TOOL_KEYS: Record<string, Tool> = {
   p: 'pen',
   e: 'eraser',
   h: 'hand',
+  k: 'laser',
   t: 'text',
   r: 'rect',
   o: 'ellipse',
@@ -30,6 +31,8 @@ export type ShortcutAction =
   | { type: 'reorder'; to: ReorderTarget }
   | { type: 'nudge'; dx: number; dy: number }
   | { type: 'export' }
+  | { type: 'save' }
+  | { type: 'open' }
   | { type: 'help' }
   | { type: 'edit' }
   | { type: 'escape' };
@@ -64,6 +67,8 @@ export function shortcutFor(e: KeyInfo): ShortcutAction | null {
     }
     if (key === 'a') return { type: 'select-all' };
     if (key === 'd') return { type: 'duplicate' };
+    if (key === 's') return { type: 'save' };
+    if (key === 'o') return { type: 'open' };
     return null;
   }
   if (e.altKey) return null;

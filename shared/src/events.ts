@@ -30,6 +30,7 @@ export const CLIENT_EVENTS = {
   elementsReorder: 'elements:reorder',
   boardClear: 'board:clear',
   cursorMove: 'cursor:move',
+  laserMove: 'laser:move',
 } as const;
 
 export const SERVER_EVENTS = {
@@ -47,6 +48,7 @@ export const SERVER_EVENTS = {
   participantJoined: 'participant:joined',
   participantLeft: 'participant:left',
   cursorMoved: 'cursor:moved',
+  laserMoved: 'laser:moved',
   error: 'error',
 } as const;
 
@@ -116,6 +118,15 @@ export const boardClearPayload = z.object({});
 
 export const cursorMovePayload = z.object({ point: pointSchema });
 
+/**
+ * New points of a laser pointer trail. `id` names one press, so separate presses never join up.
+ * Trails fade on their own and are never stored, so there is no end event.
+ */
+export const laserMovePayload = z.object({
+  id: idSchema,
+  points: z.array(pointSchema).min(1).max(LIMITS.maxLaserPointsPerMessage),
+});
+
 // ---- Server -> client payloads ----
 
 export const roomStatePayload = z.object({
@@ -149,6 +160,9 @@ export const participantLeftPayload = z.object({ clientId: idSchema });
 
 export const cursorMovedPayload = z.object({ clientId: idSchema, point: pointSchema });
 
+/** Relays add the id of the participant who is pointing. */
+export const laserMovedPayload = laserMovePayload.extend({ clientId: idSchema });
+
 export const ERROR_CODES = [
   'invalid_payload',
   'not_in_room',
@@ -181,6 +195,7 @@ export type ElementsReorderPayload = z.infer<typeof elementsReorderPayload>;
 export type ReorderTarget = (typeof REORDER_TARGETS)[number];
 export type BoardClearPayload = z.infer<typeof boardClearPayload>;
 export type CursorMovePayload = z.infer<typeof cursorMovePayload>;
+export type LaserMovePayload = z.infer<typeof laserMovePayload>;
 
 export type RoomStatePayload = z.infer<typeof roomStatePayload>;
 export type StrokeStartRelayPayload = z.infer<typeof strokeStartRelayPayload>;
@@ -196,6 +211,7 @@ export type BoardClearedPayload = z.infer<typeof boardClearedPayload>;
 export type ParticipantJoinedPayload = z.infer<typeof participantJoinedPayload>;
 export type ParticipantLeftPayload = z.infer<typeof participantLeftPayload>;
 export type CursorMovedPayload = z.infer<typeof cursorMovedPayload>;
+export type LaserMovedPayload = z.infer<typeof laserMovedPayload>;
 export type ErrorCode = z.infer<typeof errorCodeSchema>;
 export type ErrorPayload = z.infer<typeof errorPayload>;
 
@@ -214,6 +230,7 @@ export interface ClientToServerEvents {
   [CLIENT_EVENTS.elementsReorder]: (payload: ElementsReorderPayload) => void;
   [CLIENT_EVENTS.boardClear]: (payload: BoardClearPayload) => void;
   [CLIENT_EVENTS.cursorMove]: (payload: CursorMovePayload) => void;
+  [CLIENT_EVENTS.laserMove]: (payload: LaserMovePayload) => void;
 }
 
 export interface ServerToClientEvents {
@@ -231,5 +248,6 @@ export interface ServerToClientEvents {
   [SERVER_EVENTS.participantJoined]: (payload: ParticipantJoinedPayload) => void;
   [SERVER_EVENTS.participantLeft]: (payload: ParticipantLeftPayload) => void;
   [SERVER_EVENTS.cursorMoved]: (payload: CursorMovedPayload) => void;
+  [SERVER_EVENTS.laserMoved]: (payload: LaserMovedPayload) => void;
   [SERVER_EVENTS.error]: (payload: ErrorPayload) => void;
 }

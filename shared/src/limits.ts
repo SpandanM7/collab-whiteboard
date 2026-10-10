@@ -33,6 +33,8 @@ export const LIMITS = {
    */
   pointsPerToken: 1_000,
   maxNameLength: 32,
+  /** Max points in one `laser:move` message. The client chunks batches to this size. */
+  maxLaserPointsPerMessage: 100,
   /** A cursor with no update for this long is considered gone (server drops it, client hides it). */
   cursorTtlMs: 10_000,
   /** Per-socket rate limit: a burst of this many events, refilled at `eventsPerSecond`. */

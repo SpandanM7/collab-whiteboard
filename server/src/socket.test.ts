@@ -12,6 +12,7 @@ import type {
   ElementsReorderedPayload,
   ElementsUpdatedPayload,
   ErrorPayload,
+  LaserMovedPayload,
   RoomStatePayload,
   ServerToClientEvents,
 } from '@whiteboard/shared';
@@ -152,6 +153,42 @@ describe('rate limiting', () => {
     const moved = next(b.client, SERVER_EVENTS.cursorMoved);
     a.client.emit(CLIENT_EVENTS.cursorMove, { point: { x: 5, y: 5 } });
     await moved;
+  });
+});
+
+describe('laser:move', () => {
+  beforeEach(() => start());
+
+  it('relays a trail to everyone else with the sender id, and never stores it', async () => {
+    const a = await join('Ann');
+    const b = await join('Bob');
+    let echoed = false;
+    a.client.on(SERVER_EVENTS.laserMoved, () => (echoed = true));
+
+    const moved = next<LaserMovedPayload>(b.client, SERVER_EVENTS.laserMoved);
+    const points = [
+      { x: 1, y: 2 },
+      { x: 3, y: 4 },
+    ];
+    a.client.emit(CLIENT_EVENTS.laserMove, { id: 'trail-1', points });
+    expect(await moved).toEqual({ id: 'trail-1', points, clientId: a.client.id });
+
+    const late = await join('Cy');
+    expect(late.state.board.elements).toEqual([]);
+    expect(late.state.participants.every((p) => !('laser' in p))).toBe(true);
+    expect(echoed).toBe(false);
+  });
+
+  it('rejects an invalid trail without relaying it', async () => {
+    const a = await join('Ann');
+    const b = await join('Bob');
+    let relayed = false;
+    b.client.on(SERVER_EVENTS.laserMoved, () => (relayed = true));
+    const error = next<ErrorPayload>(a.client, SERVER_EVENTS.error);
+    a.client.emit(CLIENT_EVENTS.laserMove, { id: 'trail-1', points: [] });
+    expect((await error).code).toBe('invalid_payload');
+    await sleep(50);
+    expect(relayed).toBe(false);
   });
 });
 

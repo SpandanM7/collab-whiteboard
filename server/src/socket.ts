@@ -12,6 +12,7 @@ import {
   elementsDeletePayload,
   elementsReorderPayload,
   elementsUpdatePayload,
+  laserMovePayload,
   pointCountOf,
   roomJoinPayload,
   strokeEndPayload,
@@ -270,6 +271,21 @@ export function registerSocketHandlers(
       socket
         .to(channel(boardId))
         .volatile.emit(SERVER_EVENTS.cursorMoved, { clientId: socket.id, point });
+    }),
+  );
+
+  socket.on(
+    CLIENT_EVENTS.laserMove,
+    guarded(laserMovePayload, (payload, boardId) => {
+      const result = rooms.pointLaser(boardId, socket.id);
+      if (!result.ok) {
+        sendError(result.error.code, result.error.message);
+        return;
+      }
+      // Volatile like cursors: a trail fades within a second, so a late batch is worthless.
+      socket
+        .to(channel(boardId))
+        .volatile.emit(SERVER_EVENTS.laserMoved, { ...payload, clientId: socket.id });
     }),
   );
 

@@ -11,7 +11,10 @@ import {
   ExportIcon,
   HandIcon,
   KeyboardIcon,
+  LaserIcon,
   MoreIcon,
+  OpenIcon,
+  SaveIcon,
   SelectIcon,
   TextIcon,
   TrashIcon,
@@ -33,6 +36,13 @@ type Props = {
   /** Whether the line width applies (it does not to text). Wide layout only. */
   showWidth: boolean;
   onExport: () => void;
+  /** Download the board as a file, and add the elements of such a file to the board. */
+  onSave: () => void;
+  onOpen: () => void;
+  /** Nothing on the board to save. */
+  saveDisabled?: boolean;
+  /** The board cannot take new elements (e.g. the room is full). */
+  openDisabled?: boolean;
   onShortcuts: () => void;
   onClear: () => void;
   /** Clearing has to reach the server, so it is unavailable while offline. */
@@ -53,6 +63,10 @@ export function Toolbar({
   onStyleToggle,
   showWidth,
   onExport,
+  onSave,
+  onOpen,
+  saveDisabled,
+  openDisabled,
   onShortcuts,
   onClear,
   clearDisabled,
@@ -127,6 +141,7 @@ export function Toolbar({
         </>,
       )}
       {toolButton('hand', 'Hand', 'H', HandIcon, 'wide-only')}
+      {toolButton('laser', 'Laser', 'K', LaserIcon, 'roomy-only')}
       <button
         type="button"
         className={`shapes-toggle${shapeActive ? ' active' : ''}`}
@@ -221,8 +236,21 @@ export function Toolbar({
               'aria-current': tool === 'hand' ? 'true' : undefined,
             })}
           </div>
+          <div className="unless-roomy">
+            {menuItem('Laser pointer', LaserIcon, () => onToolChange('laser'), {
+              'aria-current': tool === 'laser' ? 'true' : undefined,
+            })}
+          </div>
           {menuItem('Export image…', ExportIcon, onExport, {
             title: `Export image (${modKey()}+Shift+E)`,
+          })}
+          {menuItem('Save to file', SaveIcon, onSave, {
+            disabled: saveDisabled,
+            title: saveDisabled ? 'Nothing to save yet' : `Save to file (${modKey()}+S)`,
+          })}
+          {menuItem('Open file…', OpenIcon, onOpen, {
+            disabled: openDisabled,
+            title: `Add a saved board to this one (${modKey()}+O)`,
           })}
           {menuItem('Keyboard shortcuts', KeyboardIcon, onShortcuts, { title: 'Shortcuts (?)' })}
           <hr />
