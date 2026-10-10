@@ -92,6 +92,13 @@ export const HandIcon = (
   </>
 );
 
+export const LaserIcon = (
+  <>
+    <circle cx="12" cy="12" r="2.5" fill="currentColor" />
+    <path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1" />
+  </>
+);
+
 export const CloseIcon = <path d="M6 6l12 12M18 6 6 18" />;
 
 export const AlignLeftIcon = <path d="M4 6h16M4 10h10M4 14h16M4 18h10" />;

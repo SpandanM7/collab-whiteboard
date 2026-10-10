@@ -6,6 +6,7 @@ import { ConnectionStatus } from '../components/ConnectionStatus.tsx';
 import { CursorLayer } from '../components/CursorLayer.tsx';
 import { ExportDialog } from '../components/ExportDialog.tsx';
 import { HistoryControls } from '../components/HistoryControls.tsx';
+import { LaserLayer } from '../components/LaserLayer.tsx';
 import { ParticipantList } from '../components/ParticipantList.tsx';
 import { SelectionActions } from '../components/SelectionActions.tsx';
 import { ShareButton } from '../components/ShareButton.tsx';
@@ -391,6 +392,7 @@ export function BoardPage({ boardId }: { boardId: string }) {
           cursorRef.current = point;
           sync.moveCursor(point);
         }}
+        onLaser={sync.pointLaser}
       />
       {editor && (
         <TextEditor
@@ -400,6 +402,12 @@ export function BoardPage({ boardId }: { boardId: string }) {
           onCommit={commitText}
         />
       )}
+      <LaserLayer
+        trails={sync.laser}
+        participants={sync.participants}
+        selfColor={identity.color}
+        view={board.view}
+      />
       <CursorLayer
         participants={sync.participants}
         cursors={sync.cursors}

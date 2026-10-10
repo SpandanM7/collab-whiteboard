@@ -17,6 +17,7 @@ describe('shortcutFor', () => {
     ['p', 'pen'],
     ['e', 'eraser'],
     ['h', 'hand'],
+    ['k', 'laser'],
     ['r', 'rect'],
     ['o', 'ellipse'],
     ['d', 'diamond'],

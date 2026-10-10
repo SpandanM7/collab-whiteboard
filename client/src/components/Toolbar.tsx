@@ -11,6 +11,7 @@ import {
   ExportIcon,
   HandIcon,
   KeyboardIcon,
+  LaserIcon,
   MoreIcon,
   SelectIcon,
   TextIcon,
@@ -127,6 +128,7 @@ export function Toolbar({
         </>,
       )}
       {toolButton('hand', 'Hand', 'H', HandIcon, 'wide-only')}
+      {toolButton('laser', 'Laser', 'K', LaserIcon, 'roomy-only')}
       <button
         type="button"
         className={`shapes-toggle${shapeActive ? ' active' : ''}`}
@@ -219,6 +221,11 @@ export function Toolbar({
           <div className="compact-only">
             {menuItem('Hand (pan)', HandIcon, () => onToolChange('hand'), {
               'aria-current': tool === 'hand' ? 'true' : undefined,
+            })}
+          </div>
+          <div className="unless-roomy">
+            {menuItem('Laser pointer', LaserIcon, () => onToolChange('laser'), {
+              'aria-current': tool === 'laser' ? 'true' : undefined,
             })}
           </div>
           {menuItem('Export image…', ExportIcon, onExport, {

@@ -13,6 +13,7 @@ const sections = (mod: string): { title: string; rows: Row[] }[] => [
       ['Pen', ['P']],
       ['Eraser', ['E']],
       ['Hand (pan)', ['H']],
+      ['Laser pointer', ['K']],
       ['Text', ['T']],
       ['Rectangle, ellipse, diamond', ['R', 'O', 'D']],
       ['Line, arrow', ['L', 'A']],

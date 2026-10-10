@@ -121,6 +121,8 @@ type Props = {
   onGestureChange: (active: boolean) => void;
   /** The pointer moved over the board (hovering or drawing), in board space. */
   onCursorMove: (point: Point) => void;
+  /** The laser pointer moved while pressed; `id` is the same for one whole press. */
+  onLaser: (id: string, points: Point[]) => void;
 };
 
 /** A one-pointer drag that moves the view (hand tool, Space + drag, or middle mouse button). */
@@ -179,6 +181,8 @@ export function Whiteboard(props: Props) {
   const hoverRef = useRef<{ id: string | null; cursor: string }>({ id: null, cursor: '' });
   const lastTapRef = useRef<{ at: number; x: number; y: number } | null>(null);
   const eraseGestureRef = useRef('');
+  // The laser press under way, if any: its trail id. Trails fade by themselves, nothing to commit.
+  const laserRef = useRef<string | null>(null);
   const pointerIdRef = useRef<number | null>(null);
   const panRef = useRef<Pan | null>(null);
   const pinchRef = useRef<Pinch | null>(null);
@@ -710,6 +714,7 @@ export function Whiteboard(props: Props) {
     pinchRef.current = null;
     touchesRef.current.clear();
     ignoredRef.current.clear();
+    laserRef.current = null;
     if (activeRef.current || shapeRef.current || selectRef.current) {
       activeRef.current = null;
       shapeRef.current = null;
@@ -740,6 +745,7 @@ export function Whiteboard(props: Props) {
     dragRef.current = null;
     cancelSelectGesture();
     if (stroke) propsRef.current.onStrokeCancel(stroke.id);
+    laserRef.current = null;
     pointerIdRef.current = null;
     panRef.current = null;
     setPanState('');
@@ -958,6 +964,11 @@ export function Whiteboard(props: Props) {
       };
       return;
     }
+    if (tool === 'laser') {
+      laserRef.current = nanoid();
+      propsRef.current.onLaser(laserRef.current, [point]);
+      return;
+    }
     if (tool === 'eraser') {
       eraseGestureRef.current = nanoid();
       erase([point]);
@@ -1036,7 +1047,9 @@ export function Whiteboard(props: Props) {
       toBoard(s, rect, view),
     );
 
-    if (propsRef.current.tool === 'eraser') {
+    if (laserRef.current) {
+      propsRef.current.onLaser(laserRef.current, points);
+    } else if (propsRef.current.tool === 'eraser') {
       erase(points);
     } else if (dragRef.current) {
       dragRef.current.pointer = points[points.length - 1];
@@ -1073,6 +1086,10 @@ export function Whiteboard(props: Props) {
 
     if (id !== pointerIdRef.current) return;
     pointerIdRef.current = null;
+    if (laserRef.current) {
+      laserRef.current = null;
+      return;
+    }
 
     const select = selectRef.current;
     if (select) {

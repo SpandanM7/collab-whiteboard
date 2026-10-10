@@ -7,6 +7,7 @@ export const TOOL_KEYS: Record<string, Tool> = {
   p: 'pen',
   e: 'eraser',
   h: 'hand',
+  k: 'laser',
   t: 'text',
   r: 'rect',
   o: 'ellipse',
