@@ -29,16 +29,22 @@ export type ExportFrame = {
   scale: number;
 };
 
-/** What exporting `elements` at `scale` produces, or null when there is nothing to export. */
-export function exportFrame(elements: readonly BoardElement[], scale: number): ExportFrame | null {
+/** The board area an export covers: the drawing plus padding, on whole units. */
+export function exportBounds(elements: readonly BoardElement[]): Rect | null {
   const content = contentBounds([...elements]);
   if (!content) return null;
-  const bounds = {
+  return {
     left: Math.floor(content.left - EXPORT_PADDING),
     top: Math.floor(content.top - EXPORT_PADDING),
     right: Math.ceil(content.right + EXPORT_PADDING),
     bottom: Math.ceil(content.bottom + EXPORT_PADDING),
   };
+}
+
+/** What exporting `elements` at `scale` produces, or null when there is nothing to export. */
+export function exportFrame(elements: readonly BoardElement[], scale: number): ExportFrame | null {
+  const bounds = exportBounds(elements);
+  if (!bounds) return null;
   const w = bounds.right - bounds.left;
   const h = bounds.bottom - bounds.top;
   const capped = Math.min(
@@ -86,13 +92,13 @@ export function canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob> {
   );
 }
 
-/** "whiteboard-<board>-2026-10-06-1430.png", in local time. */
-export function exportFileName(boardId: string, date: Date): string {
+/** "whiteboard-<board>-2026-10-06-1430.png" (or another extension), in local time. */
+export function exportFileName(boardId: string, date: Date, extension = 'png'): string {
   const pad = (n: number) => String(n).padStart(2, '0');
   const stamp =
     `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}-` +
     `${pad(date.getHours())}${pad(date.getMinutes())}`;
-  return `whiteboard-${boardId}-${stamp}.png`;
+  return `whiteboard-${boardId}-${stamp}.${extension}`;
 }
 
 /** Saves a blob as a file through a temporary link. */

@@ -1,6 +1,12 @@
 import { nanoid } from 'nanoid';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { BoardElement, ElementType, Point, TextElement } from '@whiteboard/shared';
+import type {
+  BoardElement,
+  ElementInput,
+  ElementType,
+  Point,
+  TextElement,
+} from '@whiteboard/shared';
 import { ConfirmDialog } from '../components/ConfirmDialog.tsx';
 import { ConnectionStatus } from '../components/ConnectionStatus.tsx';
 import { CursorLayer } from '../components/CursorLayer.tsx';
@@ -21,9 +27,12 @@ import { useBoardActions } from '../hooks/useBoardActions.ts';
 import { useBoardSync } from '../hooks/useBoardSync.ts';
 import { useCompactLayout } from '../hooks/useCompactLayout.ts';
 import { useBoardView } from '../hooks/useBoardView.ts';
+import { MAX_BOARD_FILE_BYTES, parseBoardFile, serializeBoardFile } from '../lib/boardFile.ts';
 import { cloneElements, parseElements, serializeElements } from '../lib/elementClipboard.ts';
+import { downloadBlob, exportFileName } from '../lib/exportImage.ts';
 import { loadIdentity, saveIdentity } from '../lib/identity.ts';
 import { selectionBounds } from '../lib/selection.ts';
+import { contentBounds } from '../lib/view.ts';
 import { GRID_SIZE } from '../lib/shapeDrag.ts';
 import { isTypingTarget, shortcutFor } from '../lib/shortcuts.ts';
 import type { ShortcutAction } from '../lib/shortcuts.ts';
@@ -70,6 +79,8 @@ export function BoardPage({ boardId }: { boardId: string }) {
   const compact = useCompactLayout();
   // The last place the pointer was over the board: where pasted things go.
   const cursorRef = useRef<Point | null>(null);
+  // The hidden file picker behind "Open file…".
+  const fileInputRef = useRef<HTMLInputElement>(null);
   // Drawing and erasing work offline (they sync later). Clearing is online-only: replaying it
   // after a reconnect could wipe what others drew in the meantime.
   const online = sync.status === 'connected' && !sync.blocked;
@@ -242,6 +253,78 @@ export function BoardPage({ boardId }: { boardId: string }) {
     setSelectedIds([element.id]);
   };
 
+  // ---- Saving to and opening from a file ----
+
+  const saveToFile = () => {
+    if (sync.elements.length === 0) {
+      sync.showToast('Nothing to save yet. Draw something first.', 'info');
+      return;
+    }
+    const now = new Date();
+    const blob = new Blob([serializeBoardFile(sync.elements, now)], { type: 'application/json' });
+    downloadBlob(blob, exportFileName(boardId, now, 'json'));
+  };
+
+  const openFile = () => {
+    if (sync.blocked) return;
+    fileInputRef.current?.click();
+  };
+
+  /**
+   * Adds a saved board's elements to this board, where they were when saved, as new elements
+   * (so opening a file twice gives two copies, not clashing ids). Nothing on the board is
+   * replaced: to start over, clear the board first. Opening is one undo step.
+   */
+  const importElements = (elements: ElementInput[], skipped: number) => {
+    const clones = cloneElements(
+      elements,
+      { offset: { x: 0, y: 0 } },
+      nanoid,
+      LOCAL_AUTHOR_ID,
+      Date.now(),
+    );
+    if (!actions.addElements(clones)) return;
+    board.markInteracted();
+    changeTool('select');
+    setSelectedIds(clones.map((e) => e.id));
+    const bounds = contentBounds(clones);
+    if (bounds) board.show(bounds);
+    const added = `Added ${clones.length} ${clones.length === 1 ? 'element' : 'elements'} from the file.`;
+    sync.showToast(
+      skipped > 0
+        ? `${added} ${skipped} ${skipped === 1 ? 'was' : 'were'} damaged or too many and left out.`
+        : added,
+      skipped > 0 ? 'error' : 'info',
+    );
+  };
+
+  const readFile = async (file: File) => {
+    if (file.size > MAX_BOARD_FILE_BYTES) {
+      sync.showToast('That file is too big to be a saved board.');
+      return;
+    }
+    let text: string;
+    try {
+      text = await file.text();
+    } catch {
+      sync.showToast("The file couldn't be read.");
+      return;
+    }
+    const result = parseBoardFile(text);
+    if (!result.ok) {
+      sync.showToast(
+        result.reason === 'too-new'
+          ? 'That file was saved by a newer version of the app. Reload the page and try again.'
+          : result.reason === 'empty'
+            ? 'That file has nothing on it to add.'
+            : "That file isn't a saved board. Use a .json file from Save to file.",
+      );
+      return;
+    }
+    // Read through the ref: the board may have changed while the file was being read.
+    latest.current.importElements(result.elements, result.skipped);
+  };
+
   const undoOrRedo = (which: 'undo' | 'redo') => {
     const restored = which === 'undo' ? actions.undo() : actions.redo();
     setSelectedIds(tool === 'select' ? restored : []);
@@ -294,6 +377,13 @@ export function BoardPage({ boardId }: { boardId: string }) {
       case 'export':
         setExportOpen(true);
         return true;
+      // Always handled, so the browser's own Save page and Open file never show up instead.
+      case 'save':
+        saveToFile();
+        return true;
+      case 'open':
+        openFile();
+        return true;
       case 'help':
         setShortcutsOpen(true);
         return true;
@@ -305,9 +395,9 @@ export function BoardPage({ boardId }: { boardId: string }) {
   };
 
   // Window listeners read the latest render's handlers through this ref.
-  const latest = useRef({ runShortcut, paste, selection, deleteSelection });
+  const latest = useRef({ runShortcut, paste, selection, deleteSelection, importElements });
   useLayoutEffect(() => {
-    latest.current = { runShortcut, paste, selection, deleteSelection };
+    latest.current = { runShortcut, paste, selection, deleteSelection, importElements };
   });
 
   // Keyboard shortcuts, and copy / cut / paste through the browser's clipboard events (they need
@@ -449,6 +539,10 @@ export function BoardPage({ boardId }: { boardId: string }) {
         onStyleToggle={() => setStyleOpen((open) => !open)}
         showWidth={!(styleTypes?.every((t) => t === 'text') ?? false)}
         onExport={() => setExportOpen(true)}
+        onSave={saveToFile}
+        onOpen={openFile}
+        saveDisabled={sync.elements.length === 0}
+        openDisabled={sync.blocked !== null}
         onShortcuts={() => setShortcutsOpen(true)}
         onClear={() => setConfirmingClear(true)}
         clearDisabled={!online}
@@ -502,6 +596,19 @@ export function BoardPage({ boardId }: { boardId: string }) {
         onNotify={sync.showToast}
       />
       <ShortcutsDialog open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".json,application/json"
+        hidden
+        aria-label="Open a saved board"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          // Cleared, so choosing the same file again still counts as a change.
+          e.target.value = '';
+          if (file) void readFile(file);
+        }}
+      />
       <ConfirmDialog
         // Also closes if the connection drops while the dialog is open.
         open={confirmingClear && online}

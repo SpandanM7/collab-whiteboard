@@ -48,6 +48,7 @@ const sections = (mod: string): { title: string; rows: Row[] }[] => [
       ['Zoom', [`${mod}+wheel`, 'Pinch']],
       ['Grid and snapping', [`${mod}+'`]],
       ['Export image', [`${mod}+Shift+E`]],
+      ['Save to file, open a file', [`${mod}+S`, `${mod}+O`]],
       ['This list', ['?']],
     ],
   },
